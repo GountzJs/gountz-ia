@@ -14,15 +14,18 @@ Es fundamental delimitar con claridad técnica el alcance y los límites del ais
 - **Control de estado en tu rama:** Tu rama base permanece limpia; su `git status` no se ve afectado mientras el agente trabaja en paralelo.
 
 ### Guardrails Automáticos de Git en el Worktree (Protección de Repositorio)
-Para evitar que un agente autónomo con acceso a shell ejecute comandos destructivos en Git, `gz-ia` configura guardrails activos por worktree:
-- **Bloqueo estricto de `git push` (`pre-push` hook):** Ningún comando de push puede enviarse a un remoto desde el worktree de la sesión. Toda publicación remota debe ser ejecutada por el operador humano en el repositorio base.
-- **Protección de ramas y referencias (`reference-transaction` hook):** El agente solo tiene permitido crear o modificar referencias dentro de su propio namespace (`refs/heads/harness/*` y `HEAD`). Cualquier intento de modificar o pisar ramas principales como `main`, `master` o ramas de staging es interceptado y abortado en tiempo real.
-- **Configuración aislada (`extensions.worktreeConfig`):** La directiva `core.hooksPath` se establece exclusivamente en `.git/worktrees/<id>/config.worktree`. Tu repositorio principal no tiene ningún hook restrictivo y puedes continuar haciendo commits, ramas y pushes libremente.
-- **Exclusión local limpia (`.git/info/exclude`):** `.harness` se ignora automáticamente a nivel de repositorio sin ensuciar ni modificar el archivo `.gitignore` compartido del proyecto.
+Para prevenir errores y modificaciones accidentales en Git, `gz-ia` configura guardrails activos por worktree:
+- **Bloqueo de `git push` (`pre-push` hook):** Impide que comandos automáticos envíen cambios al remoto desde el worktree de la sesión.
+- **Protección estricta de ramas (`reference-transaction` hook):** El agente solo tiene permitido operar dentro de su propia rama (`refs/heads/harness/<sessionID>` y `HEAD`). No puede modificar `main`, `master`, ni la rama de otra sesión simultánea (`refs/heads/harness/<otra-sesión>`).
+- **Reenvío de hooks de proyecto (Husky, lint-staged, commitlint):** Si el repositorio base cuenta con hooks de `commit-msg` o `pre-commit`, los hooks del worktree los invocan de forma transparente para asegurar que las convenciones de commit del proyecto se respeten.
+- **Aislamiento de artefactos efímeros (`core.excludesFile`):** Cada worktree ignora localmente `.agents/`, `.mcp.json` y `*-AGENTS.md`. Al ejecutar `session get`, estos artefactos efímeros y el prompt sintético se purgan de forma atómica antes del commit para evitar filtrar secretos o directivas al repositorio base.
+- **Configuración aislada (`extensions.worktreeConfig`):** La directiva `core.hooksPath` y `core.excludesFile` se establecen exclusivamente a nivel de worktree (`config.worktree`).
 
-### Qué NO es: No es un sandbox de sistema ni de kernel
-- **Sin aislamiento de procesos ni sistema operativo:** Un agente que disponga de herramientas de ejecución en terminal (shell) corre con los permisos de tu usuario local en el host.
-- **Aislamiento a nivel de sistema:** Si tu caso de uso requiere contención de red, aislamiento de archivos personales (`~`) o restricciones de kernel, la ejecución debe encapsularse en contenedores (**Docker / DevContainers**) o namespaces de Linux (`bwrap`).
+### Alcance y Límites de los Guardrails: Prevención de Accidentes vs Sandbox
+> [!IMPORTANT] Prevención contra errores accidentales, no contención adversaria
+> Los guardrails de Git están diseñados para **prevenir errores y descuidos comunes** de los modelos de IA (como intentar un `git push` o cambiar de rama sin querer).
+> **No constituyen un sandbox de seguridad hermético:** Un agente con acceso a shell y permisos autónomos podría eludir los hooks intencionalmente ejecutando `git push --no-verify`, sobrescribiendo la configuración con `git -c core.hooksPath=/dev/null`, o accediendo al repositorio base con `cd ../../../`.
+> Si se requiere contención estricta frente a código no confiable, se debe ejecutar `gz-ia` dentro de un contenedor **Docker** o **DevContainer**.
 
 ---
 

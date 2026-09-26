@@ -30,9 +30,11 @@ func (g *OSGitClient) Run(ctx context.Context, dir string, args ...string) (stri
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
+
 
 // Workspace representa el entorno de trabajo preparado para una sesión agéntica.
 type Workspace struct {
@@ -195,7 +197,9 @@ func (p *GitProvider) Prepare(ctx context.Context, sessionID string, baseDir str
 	// Si el worktree ya existe físicamente en el disco (p.ej. reanudación previa)
 	if fi, statErr := os.Stat(worktreeDir); statErr == nil && fi.IsDir() {
 		_ = p.ensureGitExcludeHarness(ctx, baseDir)
-		_ = p.installWorktreeGuardrails(ctx, baseDir, worktreeDir, sessionID)
+		if gErr := p.installWorktreeGuardrails(ctx, baseDir, worktreeDir, sessionID); gErr != nil {
+			return nil, fmt.Errorf("error al configurar guardrails en worktree existente: %w", gErr)
+		}
 		return &Workspace{
 			WorkingDir:  baseDir,
 			TargetDir:   worktreeDir,
@@ -226,7 +230,9 @@ func (p *GitProvider) Prepare(ctx context.Context, sessionID string, baseDir str
 	}
 
 	// Instalar guardrails de Git en el worktree (pre-push y reference-transaction)
-	_ = p.installWorktreeGuardrails(ctx, baseDir, worktreeDir, sessionID)
+	if gErr := p.installWorktreeGuardrails(ctx, baseDir, worktreeDir, sessionID); gErr != nil {
+		return nil, fmt.Errorf("error al instalar guardrails de seguridad en el worktree: %w", gErr)
+	}
 
 	return &Workspace{
 		WorkingDir:  baseDir,
@@ -268,6 +274,9 @@ func (p *GitProvider) CleanupWorktree(ctx context.Context, baseDir string, workt
 
 	// Podar referencias muertas en el metadata de worktrees
 	_, _ = p.git.Run(ctx, baseDir, "worktree", "prune")
+
+	// Si no quedan más worktrees ni ramas de harness, restaurar configuración del repositorio
+	p.cleanupWorktreeConfigIfNoHarness(ctx, baseDir)
 
 	return firstErr
 }
@@ -385,6 +394,9 @@ func (p *GitProvider) Prune(ctx context.Context, baseDir string, activeSessionID
 		}
 	}
 
+	// Si no quedan más worktrees ni ramas de harness, restaurar configuración del repositorio
+	p.cleanupWorktreeConfigIfNoHarness(ctx, baseDir)
+
 	return report, nil
 }
 
@@ -422,39 +434,62 @@ func (p *GitProvider) DiffWorktree(ctx context.Context, baseDir string, worktree
 	// 2. Si el worktree existe físicamente en disco, inspeccionar directamente en su directorio
 	if worktreeDir != "" {
 		if fi, err := os.Stat(worktreeDir); err == nil && fi.IsDir() {
-			// Detectar archivos untracked para incluirlos en el diff con intent-to-add (-N)
-			statusOut, _ := p.git.Run(ctx, worktreeDir, "status", "--porcelain")
-			var untrackedFiles []string
-			for _, line := range strings.Split(statusOut, "\n") {
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "?? ") {
-					f := strings.TrimSpace(line[3:])
-					f = strings.Trim(f, "\"")
-					if f != "" {
-						untrackedFiles = append(untrackedFiles, f)
-					}
-				}
-			}
-
-			for _, f := range untrackedFiles {
-				_, _ = p.git.Run(ctx, worktreeDir, "add", "-N", "--", f)
-			}
-			defer func() {
-				for _, f := range untrackedFiles {
-					_, _ = p.git.Run(ctx, worktreeDir, "reset", "-q", "--", f)
-				}
-			}()
-
 			diffArgs := []string{"diff"}
 			if statOnly {
 				diffArgs = append(diffArgs, "--stat")
 			}
 			diffArgs = append(diffArgs, baseRef)
-			out, err := p.git.Run(ctx, worktreeDir, diffArgs...)
-			if err != nil {
-				return "", fmt.Errorf("error al ejecutar git diff en worktree: %w", err)
+			trackedDiff, _ := p.git.Run(ctx, worktreeDir, diffArgs...)
+
+			// Detectar archivos untracked usando git status --porcelain sin alterar el índice de git
+			statusOut, _ := p.git.Run(ctx, worktreeDir, "status", "--porcelain")
+			var untrackedDiffs []string
+
+			// Comprobar si AGENTS.md está trackeado en el repositorio base HEAD
+			trackedAgents := false
+			if _, chkErr := p.git.Run(ctx, baseDir, "cat-file", "-e", "HEAD:AGENTS.md"); chkErr == nil {
+				trackedAgents = true
 			}
-			return strings.TrimSpace(out), nil
+
+			for _, line := range strings.Split(statusOut, "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "?? ") {
+					f := strings.TrimSpace(line[3:])
+					f = strings.Trim(f, "\"")
+					if f == "" {
+						continue
+					}
+					// Ignorar artefactos efímeros proyectados de gz-ia
+					if isHarnessArtifact(f) {
+						continue
+					}
+					if f == "AGENTS.md" && !trackedAgents {
+						continue
+					}
+
+					var uArgs []string
+					if statOnly {
+						uArgs = []string{"diff", "--no-index", "--stat", "--", "/dev/null", f}
+					} else {
+						uArgs = []string{"diff", "--no-index", "--", "/dev/null", f}
+					}
+					uDiff, _ := p.git.Run(ctx, worktreeDir, uArgs...)
+					if strings.TrimSpace(uDiff) != "" {
+						untrackedDiffs = append(untrackedDiffs, strings.TrimSpace(uDiff))
+					}
+				}
+			}
+
+			result := strings.TrimSpace(trackedDiff)
+			if len(untrackedDiffs) > 0 {
+				joinedUntracked := strings.Join(untrackedDiffs, "\n\n")
+				if result != "" {
+					result = result + "\n\n" + joinedUntracked
+				} else {
+					result = joinedUntracked
+				}
+			}
+			return strings.TrimSpace(result), nil
 		}
 	}
 
@@ -506,6 +541,30 @@ func (p *GitProvider) MergeWorktree(ctx context.Context, sessionID string, baseD
 	// 1. Si en el worktree hay archivos sin comitear (uncommitted/untracked), prepararlos y comitearlos en la rama del worktree
 	if worktreeDir != "" {
 		if fi, err := os.Stat(worktreeDir); err == nil && fi.IsDir() {
+			// A. Comprobar si AGENTS.md estaba trackeado en el repositorio base en HEAD
+			trackedInHead := false
+			if _, chkErr := p.git.Run(ctx, baseDir, "cat-file", "-e", "HEAD:AGENTS.md"); chkErr == nil {
+				trackedInHead = true
+			}
+
+			if trackedInHead {
+				// Restaurar el AGENTS.md original del proyecto en el worktree antes de cualquier add/commit
+				_, _ = p.git.Run(ctx, worktreeDir, "checkout", "HEAD", "--", "AGENTS.md")
+			} else {
+				// Eliminar el AGENTS.md sintético proyectado de la sesión
+				_ = os.Remove(filepath.Join(worktreeDir, "AGENTS.md"))
+			}
+
+			// B. Purgar del disco y del cache de git cualquier artefacto proyectado (.agents, .mcp.json, *-AGENTS.md)
+			_ = os.RemoveAll(filepath.Join(worktreeDir, ".agents"))
+			_ = os.Remove(filepath.Join(worktreeDir, ".mcp.json"))
+			if matches, err := filepath.Glob(filepath.Join(worktreeDir, "*-AGENTS.md")); err == nil {
+				for _, m := range matches {
+					_ = os.Remove(m)
+				}
+			}
+			_, _ = p.git.Run(ctx, worktreeDir, "rm", "-rf", "--cached", "--ignore-unmatch", ".agents", ".mcp.json", "*-AGENTS.md", "AGENTS.md")
+
 			statusOut, _ := p.git.Run(ctx, worktreeDir, "status", "--porcelain")
 			if strings.TrimSpace(statusOut) != "" {
 				if _, err := p.git.Run(ctx, worktreeDir, "add", "-A"); err != nil {
@@ -592,21 +651,22 @@ func (p *GitProvider) MergeWorktree(ctx context.Context, sessionID string, baseD
 	}, nil
 }
 
-// isWorkingTreeDirty evalúa si git status --porcelain tiene modificaciones relevantes,
-// ignorando intencionalmente la carpeta interna de sesiones .harness.
+// isWorkingTreeDirty evalúa si git status --porcelain tiene modificaciones en archivos trackeados (staged o unstaged).
+// Ignora líneas de archivos sin seguimiento (??), así como rutas dentro de .harness.
 func isWorkingTreeDirty(statusOut string) bool {
 	lines := strings.Split(statusOut, "\n")
 	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
+		if len(line) < 3 {
 			continue
 		}
-		parts := strings.Fields(trimmed)
-		if len(parts) >= 2 {
-			path := parts[len(parts)-1]
-			if path == ".harness" || strings.HasPrefix(path, ".harness/") {
-				continue
-			}
+		// Ignorar archivos untracked (??)
+		if strings.HasPrefix(line, "??") {
+			continue
+		}
+		path := strings.TrimSpace(line[3:])
+		path = strings.Trim(path, "\"")
+		if path == ".harness" || strings.HasPrefix(path, ".harness/") {
+			continue
 		}
 		return true
 	}
@@ -638,8 +698,11 @@ func (p *GitProvider) ensureGitExcludeHarness(ctx context.Context, baseDir strin
 	}
 
 	strContent := string(content)
-	if strings.Contains(strContent, ".harness") {
-		return nil
+	for _, line := range strings.Split(strContent, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == ".harness" || trimmed == ".harness/" {
+			return nil
+		}
 	}
 
 	newContent := strContent
@@ -652,17 +715,20 @@ func (p *GitProvider) ensureGitExcludeHarness(ctx context.Context, baseDir strin
 }
 
 // installWorktreeGuardrails configura hooks locales y per-worktree configs en el worktree
-// para evitar que el agente (incluso en autonomous) pueda modificar ramas fuera de harness/* o hacer git push.
+// para evitar que el agente (incluso en autonomous) pueda modificar ramas fuera de harness/<sessionID> o hacer git push,
+// reenviando además los hooks de pre-commit y commit-msg del proyecto si existen.
 func (p *GitProvider) installWorktreeGuardrails(ctx context.Context, baseDir string, worktreeDir string, sessionID string) error {
-	_, _ = p.git.Run(ctx, baseDir, "config", "extensions.worktreeConfig", "true")
+	if _, err := p.git.Run(ctx, baseDir, "config", "extensions.worktreeConfig", "true"); err != nil {
+		return fmt.Errorf("error al activar extensions.worktreeConfig en baseDir: %w", err)
+	}
 
 	gitDirOut, err := p.git.Run(ctx, worktreeDir, "rev-parse", "--git-dir")
 	if err != nil {
-		return nil
+		return fmt.Errorf("error al obtener git-dir en worktree: %w", err)
 	}
 	gitDir := strings.TrimSpace(gitDirOut)
 	if gitDir == "" {
-		return nil
+		return errors.New("git-dir de worktree vacío")
 	}
 	if !filepath.IsAbs(gitDir) {
 		gitDir = filepath.Join(worktreeDir, gitDir)
@@ -670,7 +736,7 @@ func (p *GitProvider) installWorktreeGuardrails(ctx context.Context, baseDir str
 
 	hooksDir := filepath.Join(gitDir, "hooks")
 	if err := os.MkdirAll(hooksDir, 0755); err != nil {
-		return nil
+		return fmt.Errorf("error al crear directorio de hooks en worktree: %w", err)
 	}
 
 	prePushScript := `#!/bin/sh
@@ -678,23 +744,24 @@ echo "[gz-ia GUARD] 'git push' está estrictamente prohibido desde un worktree d
 echo "[gz-ia GUARD] La integración y publicación al remoto deben realizarse por el operador humano en el repositorio principal." >&2
 exit 1
 `
-	refTxScript := `#!/bin/sh
+	refTxScript := fmt.Sprintf(`#!/bin/sh
 state="$1"
 if [ "$state" = "prepared" ]; then
     while read -r old new refname; do
         case "$refname" in
-            refs/heads/harness/*|HEAD|ORIG_HEAD|FETCH_HEAD|MERGE_HEAD|AUTO_MERGE|CHERRY_PICK_HEAD|REVERT_HEAD)
+            refs/heads/harness/%s|HEAD|ORIG_HEAD|FETCH_HEAD|MERGE_HEAD|AUTO_MERGE|CHERRY_PICK_HEAD|REVERT_HEAD)
                 ;;
             *)
                 echo "[gz-ia GUARD] Modificación prohibida: la referencia '$refname' no puede ser modificada desde este worktree." >&2
-                echo "[gz-ia GUARD] El agente solo tiene permitido operar dentro del namespace 'refs/heads/harness/*'." >&2
+                echo "[gz-ia GUARD] El agente solo tiene permitido operar dentro de 'refs/heads/harness/%s'." >&2
                 exit 1
                 ;;
         esac
     done
 fi
 exit 0
-`
+`, sessionID, sessionID)
+
 	prePushPath := filepath.Join(hooksDir, "pre-push")
 	_ = os.WriteFile(prePushPath, []byte(prePushScript), 0755)
 	_ = os.Chmod(prePushPath, 0755)
@@ -703,7 +770,74 @@ exit 0
 	_ = os.WriteFile(refTxPath, []byte(refTxScript), 0755)
 	_ = os.Chmod(refTxPath, 0755)
 
-	_, _ = p.git.Run(ctx, worktreeDir, "config", "--worktree", "core.hooksPath", hooksDir)
+	// Reenviar hooks del proyecto (husky / lint-staged / commitlint) si existen
+	forwardHook := func(hookName string) {
+		huskyHook := filepath.Join(baseDir, ".husky", hookName)
+		gitHook := filepath.Join(baseDir, ".git", "hooks", hookName)
+		hookScript := fmt.Sprintf(`#!/bin/sh
+# Reenviador automático de gz-ia hacia hooks del proyecto principal
+if [ -f "%s" ]; then
+    sh "%s" "$@"
+    exit $?
+fi
+if [ -f "%s" ]; then
+    sh "%s" "$@"
+    exit $?
+fi
+exit 0
+`, huskyHook, huskyHook, gitHook, gitHook)
+		targetHook := filepath.Join(hooksDir, hookName)
+		_ = os.WriteFile(targetHook, []byte(hookScript), 0755)
+		_ = os.Chmod(targetHook, 0755)
+	}
+
+	forwardHook("commit-msg")
+	forwardHook("pre-commit")
+
+	if _, err := p.git.Run(ctx, worktreeDir, "config", "--worktree", "core.hooksPath", hooksDir); err != nil {
+		return fmt.Errorf("error al configurar core.hooksPath en worktree: %w", err)
+	}
+
+	// Configurar core.excludesFile por worktree para ignorar artefactos efímeros proyectados
+	excludePath := filepath.Join(gitDir, "harness-exclude")
+	excludeContent := `# Artefactos efímeros proyectados por gz-ia para la sesión
+.agents/
+.mcp.json
+*-AGENTS.md
+`
+	if err := os.WriteFile(excludePath, []byte(excludeContent), 0644); err != nil {
+		return fmt.Errorf("error al escribir harness-exclude en worktree: %w", err)
+	}
+	if _, err := p.git.Run(ctx, worktreeDir, "config", "--worktree", "core.excludesFile", excludePath); err != nil {
+		return fmt.Errorf("error al configurar core.excludesFile en worktree: %w", err)
+	}
+
 	return nil
 }
+
+func (p *GitProvider) cleanupWorktreeConfigIfNoHarness(ctx context.Context, baseDir string) {
+	branchesOut, err := p.git.Run(ctx, baseDir, "branch", "--list", "harness/*")
+	if err == nil && strings.TrimSpace(branchesOut) == "" {
+		wtOut, wtErr := p.git.Run(ctx, baseDir, "worktree", "list", "--porcelain")
+		if wtErr == nil && !strings.Contains(wtOut, "/.harness/worktrees/") && !strings.Contains(wtOut, "\\.harness\\worktrees\\") {
+			_, _ = p.git.Run(ctx, baseDir, "config", "--unset", "extensions.worktreeConfig")
+		}
+	}
+}
+
+func isHarnessArtifact(path string) bool {
+	clean := filepath.Clean(path)
+	base := filepath.Base(clean)
+	if clean == ".agents" || strings.HasPrefix(clean, ".agents/") || strings.HasPrefix(clean, ".agents\\") {
+		return true
+	}
+	if base == ".mcp.json" {
+		return true
+	}
+	if strings.HasSuffix(base, "-AGENTS.md") {
+		return true
+	}
+	return false
+}
+
 

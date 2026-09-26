@@ -226,3 +226,31 @@ func TestToolingService_RegisterToolsInKernel(t *testing.T) {
 		t.Errorf("Nombre de tool inesperado: %s", tool.Name())
 	}
 }
+
+func TestToolingService_Compose_Collisions(t *testing.T) {
+	tempToolingDir := t.TempDir()
+
+	// Toolkit 1 con tool "deploy" y regla "lint.md"
+	tk1Dir := filepath.Join(tempToolingDir, "toolkits", "tk1")
+	_ = os.MkdirAll(filepath.Join(tk1Dir, "rules"), 0755)
+	_ = os.WriteFile(filepath.Join(tk1Dir, "rules", "lint.md"), []byte("# Lint rules 1"), 0644)
+	_ = os.WriteFile(filepath.Join(tk1Dir, "tools.json"), []byte(`[{"name": "deploy", "command": "echo deploy1"}]`), 0644)
+
+	// Toolkit 2 con la misma tool "deploy"
+	tk2Dir := filepath.Join(tempToolingDir, "toolkits", "tk2")
+	_ = os.MkdirAll(filepath.Join(tk2Dir, "rules"), 0755)
+	_ = os.WriteFile(filepath.Join(tk2Dir, "rules", "lint.md"), []byte("# Lint rules 2"), 0644)
+	_ = os.WriteFile(filepath.Join(tk2Dir, "tools.json"), []byte(`[{"name": "deploy", "command": "echo deploy2"}]`), 0644)
+
+	svc := NewService(tempToolingDir)
+	ctx := context.Background()
+
+	_, err := svc.ComposeToolkits(ctx, []string{"tk1", "tk2"})
+	if err == nil {
+		t.Fatal("se esperaba error por colisión al componer toolkits, pero retornó nil")
+	}
+	if !strings.Contains(err.Error(), "colisión") {
+		t.Errorf("mensaje de error inesperado: %v", err)
+	}
+}
+

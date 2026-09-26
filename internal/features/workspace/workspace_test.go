@@ -950,8 +950,8 @@ func TestGitProvider_MergeWorktree_DirtyBaseDir_Fails(t *testing.T) {
 	// El agente genera un archivo en el worktree
 	_ = os.WriteFile(filepath.Join(ws.WorktreeDir, "agent.txt"), []byte("agent\n"), 0644)
 
-	// El usuario ensucia su propio repo base sin comitear
-	_ = os.WriteFile(filepath.Join(tmpDir, "uncommitted_user_file.txt"), []byte("modificado\n"), 0644)
+	// El usuario ensucia su propio repo base modificando un archivo trackeado sin comitear
+	_ = os.WriteFile(filepath.Join(tmpDir, "base.txt"), []byte("modificado\n"), 0644)
 
 	// Intentar mergear debe fallar con error amigable
 	_, mergeErr := provider.MergeWorktree(ctx, "merge_dirty", tmpDir, ws.WorktreeDir, ws.BranchName, false, false)
@@ -962,6 +962,54 @@ func TestGitProvider_MergeWorktree_DirtyBaseDir_Fails(t *testing.T) {
 		t.Errorf("error inesperado: %v", mergeErr)
 	}
 }
+
+func TestGitProvider_MergeWorktree_UntrackedBaseDir_Allowed(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git no disponible para test")
+	}
+
+	tmpDir := t.TempDir()
+	runGit := func(dir string, args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("error ejecutando git %v en %s: %v (%s)", args, dir, err, string(out))
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit(tmpDir, "init")
+	runGit(tmpDir, "config", "user.name", "Tester")
+	runGit(tmpDir, "config", "user.email", "tester@example.com")
+	_ = os.WriteFile(filepath.Join(tmpDir, "base.txt"), []byte("base\n"), 0644)
+	runGit(tmpDir, "add", "base.txt")
+	runGit(tmpDir, "commit", "-m", "base")
+
+	provider := NewDefaultProvider()
+	ctx := context.Background()
+
+	ws, err := provider.Prepare(ctx, "merge_untracked", tmpDir)
+	if err != nil {
+		t.Fatalf("Prepare falló: %v", err)
+	}
+	defer func() { _ = provider.Cleanup(ctx, ws) }()
+
+	// El agente genera un archivo en el worktree
+	_ = os.WriteFile(filepath.Join(ws.WorktreeDir, "agent.txt"), []byte("agent\n"), 0644)
+
+	// El usuario tiene un archivo sin seguimiento (untracked ??) en su repo base
+	_ = os.WriteFile(filepath.Join(tmpDir, "scratch_notes.txt"), []byte("notas\n"), 0644)
+
+	// El merge debe proceder sin bloquearse por archivos untracked
+	res, mergeErr := provider.MergeWorktree(ctx, "merge_untracked", tmpDir, ws.WorktreeDir, ws.BranchName, false, false)
+	if mergeErr != nil {
+		t.Fatalf("MergeWorktree no debió fallar por archivos untracked: %v", mergeErr)
+	}
+	if len(res.FilesIntegrated) == 0 {
+		t.Error("esperado al menos 1 archivo integrado")
+	}
+}
+
 
 func TestGitProvider_EnsureGitExcludeHarness(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
@@ -1060,5 +1108,107 @@ func TestGitProvider_Prune(t *testing.T) {
 		t.Errorf("la rama harness/orphan2 debió ser eliminada: %s", branchesOut)
 	}
 }
+
+func TestGitProvider_MergeWorktree_NoHarnessArtifactsContamination(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git no disponible para test")
+	}
+
+	tmpDir := t.TempDir()
+	runGit := func(dir string, args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("error ejecutando git %v en %s: %v (%s)", args, dir, err, string(out))
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	runGit(tmpDir, "init")
+	runGit(tmpDir, "config", "user.name", "Tester")
+	runGit(tmpDir, "config", "user.email", "tester@example.com")
+
+	// 1. Repositorio base tiene su propio AGENTS.md versionado
+	originalAgents := "# Original Repo Rules - Do Not Overwrite\n"
+	_ = os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte(originalAgents), 0644)
+	runGit(tmpDir, "add", "AGENTS.md")
+	runGit(tmpDir, "commit", "-m", "initial commit with original AGENTS.md")
+
+	provider := NewDefaultProvider()
+	ctx := context.Background()
+
+	ws, err := provider.Prepare(ctx, "clean_artifacts", tmpDir)
+	if err != nil {
+		t.Fatalf("Prepare falló: %v", err)
+	}
+	defer func() { _ = provider.Cleanup(ctx, ws) }()
+
+	// 2. En el worktree se proyectan artefactos efímeros de sesión
+	// Pisa AGENTS.md con directivas sintéticas
+	_ = os.WriteFile(filepath.Join(ws.WorktreeDir, "AGENTS.md"), []byte("# Directivas de Sesión Sintéticas"), 0644)
+	// Toolkit AGENTS
+	_ = os.WriteFile(filepath.Join(ws.WorktreeDir, "FRONT-AGENTS.md"), []byte("# Front Rules"), 0644)
+	// .mcp.json con un token sensible
+	_ = os.WriteFile(filepath.Join(ws.WorktreeDir, ".mcp.json"), []byte(`{"env":{"SECRET":"token-12345"}}`), 0644)
+	// .agents/skills/
+	skillsDir := filepath.Join(ws.WorktreeDir, ".agents", "skills")
+	_ = os.MkdirAll(skillsDir, 0755)
+	_ = os.WriteFile(filepath.Join(skillsDir, "dummy.txt"), []byte("symlink or file"), 0644)
+
+	// El agente escribe código real que sí debe integrarse
+	_ = os.WriteFile(filepath.Join(ws.WorktreeDir, "feature.go"), []byte("package feature\n"), 0644)
+
+	// 3. Ejecutar MergeWorktree
+	res, mergeErr := provider.MergeWorktree(ctx, "clean_artifacts", tmpDir, ws.WorktreeDir, ws.BranchName, false, false)
+	if mergeErr != nil {
+		t.Fatalf("MergeWorktree falló: %v", mergeErr)
+	}
+
+	// 4. Verificar que feature.go sí se integró
+	featureContent, err := os.ReadFile(filepath.Join(tmpDir, "feature.go"))
+	if err != nil || !strings.Contains(string(featureContent), "package feature") {
+		t.Fatalf("feature.go debió integrarse al repositorio base: %v", err)
+	}
+
+	// 5. Verificar que AGENTS.md en el repo base preservó las reglas originales y no las sintéticas
+	finalAgents, err := os.ReadFile(filepath.Join(tmpDir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("no se pudo leer AGENTS.md: %v", err)
+	}
+	if string(finalAgents) != originalAgents {
+		t.Errorf("AGENTS.md fue sobreescrito con artefactos de sesión!\nEsperado: %q\nObtenido: %q", originalAgents, string(finalAgents))
+	}
+
+	// 6. Verificar que .mcp.json NO existe en baseDir
+	if _, err := os.Stat(filepath.Join(tmpDir, ".mcp.json")); !os.IsNotExist(err) {
+		t.Errorf(".mcp.json se filtró al repositorio base!")
+	}
+
+	// 7. Verificar que FRONT-AGENTS.md NO existe en baseDir
+	if _, err := os.Stat(filepath.Join(tmpDir, "FRONT-AGENTS.md")); !os.IsNotExist(err) {
+		t.Errorf("FRONT-AGENTS.md se filtró al repositorio base!")
+	}
+
+	// 8. Verificar que .agents/ NO existe en baseDir
+	if _, err := os.Stat(filepath.Join(tmpDir, ".agents")); !os.IsNotExist(err) {
+		t.Errorf("carpeta .agents se filtró al repositorio base!")
+	}
+
+	// 9. Verificar que en git log del repo base no hay rastros de .mcp.json ni FRONT-AGENTS.md
+	logFiles := runGit(tmpDir, "log", "--name-only", "--oneline")
+	if strings.Contains(logFiles, ".mcp.json") {
+		t.Errorf(".mcp.json quedó grabado en el historial de git!")
+	}
+	if strings.Contains(logFiles, "FRONT-AGENTS.md") {
+		t.Errorf("FRONT-AGENTS.md quedó grabado en el historial de git!")
+	}
+	if strings.Contains(logFiles, ".agents") {
+		t.Errorf(".agents quedó grabado en el historial de git!")
+	}
+
+	_ = res
+}
+
 
 

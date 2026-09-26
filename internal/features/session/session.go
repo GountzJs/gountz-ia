@@ -129,6 +129,7 @@ func (r *OSRunner) Run(ctx context.Context, binary string, args []string, dir st
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	configureSysProcAttr(cmd)
 	if len(r.Env) > 0 {
 		cmd.Env = r.Env
 	}
@@ -267,18 +268,8 @@ func (s *Session) Start(ctx context.Context) error {
 		}
 	}
 
-	// Proyectar perfiles agénticos en el workspace si fueron configurados
-	if s.Profile != nil && len(s.Config.Profiles) > 0 {
-		composed, err := s.Profile.Compose(ctx, s.Config.Profiles)
-		if err != nil {
-			return fmt.Errorf("error al componer perfiles agénticos: %w", err)
-		}
-		if err := s.Profile.Project(ctx, ws.TargetDir, composed, s.Config.ID, s.Config.Provider); err != nil {
-			return fmt.Errorf("error al proyectar perfiles en el workspace: %w", err)
-		}
-	}
-
-	// Proyectar tooling modular (toolkits, skills, rules, directives y MCP)
+	// Proyección modular de directivas y tooling (unificado para evitar clobbering)
+	projected := false
 	if s.Tooling != nil && len(s.Config.Profiles) > 0 {
 		var activeToolkitIDs []string
 		for _, profName := range s.Config.Profiles {
@@ -287,11 +278,27 @@ func (s *Session) Start(ctx context.Context) error {
 			}
 		}
 		if len(activeToolkitIDs) > 0 {
-			if composedTooling, err := s.Tooling.ComposeToolkits(ctx, activeToolkitIDs); err == nil && composedTooling != nil {
+			composedTooling, err := s.Tooling.ComposeToolkits(ctx, activeToolkitIDs)
+			if err != nil {
+				return fmt.Errorf("error al componer toolkits en tooling: %w", err)
+			}
+			if composedTooling != nil {
 				if projErr := s.Tooling.ProjectIntoWorktree(ctx, ws.TargetDir, composedTooling, s.Config.ID); projErr != nil {
 					return fmt.Errorf("error al proyectar tooling en el worktree: %w", projErr)
 				}
+				projected = true
 			}
+		}
+	}
+
+	// Fallback a Profile únicamente si Tooling no manejó los perfiles
+	if !projected && s.Profile != nil && len(s.Config.Profiles) > 0 {
+		composed, err := s.Profile.Compose(ctx, s.Config.Profiles)
+		if err != nil {
+			return fmt.Errorf("error al componer perfiles agénticos: %w", err)
+		}
+		if err := s.Profile.Project(ctx, ws.TargetDir, composed, s.Config.ID, s.Config.Provider); err != nil {
+			return fmt.Errorf("error al proyectar perfiles en el workspace: %w", err)
 		}
 	}
 

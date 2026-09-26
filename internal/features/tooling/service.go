@@ -98,25 +98,35 @@ func (s *toolingService) ComposeToolkits(ctx context.Context, toolkitIDs []strin
 		if tk.AgentsPath != "" {
 			prefix := strings.ToUpper(strings.ReplaceAll(tk.ID, "-", "_"))
 			targetName := fmt.Sprintf("%s-AGENTS.md", prefix)
+			if existing, conflict := composed.AgentsFiles[targetName]; conflict && existing != tk.AgentsPath {
+				return nil, fmt.Errorf("colisión de directivas agénticas: el archivo '%s' ya fue definido por otro toolkit (%s vs %s)", targetName, existing, tk.AgentsPath)
+			}
 			composed.AgentsFiles[targetName] = tk.AgentsPath
 		}
 
 		// 2. Reglas Markdown
 		for ruleName, rulePath := range tk.RulesPaths {
+			if existing, conflict := composed.RulesFiles[ruleName]; conflict && existing != rulePath {
+				return nil, fmt.Errorf("colisión de reglas en tooling: la regla '%s' está definida en múltiples toolkits (%s vs %s)", ruleName, existing, rulePath)
+			}
 			composed.RulesFiles[ruleName] = rulePath
 		}
 
 		// 3. Skills
 		for skillName, skillPath := range tk.SkillPaths {
+			if existing, conflict := composed.SkillPaths[skillName]; conflict && existing != skillPath {
+				return nil, fmt.Errorf("colisión de skills en tooling: el skill '%s' está definido en múltiples toolkits (%s vs %s)", skillName, existing, skillPath)
+			}
 			composed.SkillPaths[skillName] = skillPath
 		}
 
 		// 4. Herramientas MCP
 		for _, tool := range tk.Tools {
-			if !seenTools[tool.Name] {
-				seenTools[tool.Name] = true
-				composed.Tools = append(composed.Tools, tool)
+			if seenTools[tool.Name] {
+				return nil, fmt.Errorf("colisión de herramientas MCP en tooling: la herramienta '%s' está definida en múltiples toolkits", tool.Name)
 			}
+			seenTools[tool.Name] = true
+			composed.Tools = append(composed.Tools, tool)
 		}
 	}
 

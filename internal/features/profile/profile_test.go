@@ -213,6 +213,70 @@ func TestComposer_AgentsFile_Collision(t *testing.T) {
 	}
 }
 
+func TestComposer_MCPServer_Collision(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "global")
+
+	p1Dir := filepath.Join(globalDir, "profiles", "p1")
+	_ = os.MkdirAll(p1Dir, 0755)
+	_ = os.WriteFile(filepath.Join(p1Dir, "perfil.json"), []byte(`{
+		"name": "p1",
+		"mcp_servers": {
+			"db": {"command": "npx", "args": ["pg"]}
+		}
+	}`), 0644)
+
+	p2Dir := filepath.Join(globalDir, "profiles", "p2")
+	_ = os.MkdirAll(p2Dir, 0755)
+	_ = os.WriteFile(filepath.Join(p2Dir, "perfil.json"), []byte(`{
+		"name": "p2",
+		"mcp_servers": {
+			"db": {"command": "docker", "args": ["run"]}
+		}
+	}`), 0644)
+
+	store := NewFileStore(WithGlobalDir(globalDir), WithProjectDir(tmpDir))
+	composer := NewComposer(store)
+
+	_, err := composer.Compose([]string{"p1", "p2"})
+	if err == nil {
+		t.Fatal("se esperaba error por colisión de servidor MCP 'db', pero retornó nil")
+	}
+	if !strings.Contains(err.Error(), "colisión de servidores MCP") {
+		t.Errorf("mensaje de error inesperado: %v", err)
+	}
+}
+
+func TestComposer_Env_Collision(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "global")
+
+	p1Dir := filepath.Join(globalDir, "profiles", "p1")
+	_ = os.MkdirAll(p1Dir, 0755)
+	_ = os.WriteFile(filepath.Join(p1Dir, "perfil.json"), []byte(`{
+		"name": "p1",
+		"env": {"API_URL": "https://api.v1.com"}
+	}`), 0644)
+
+	p2Dir := filepath.Join(globalDir, "profiles", "p2")
+	_ = os.MkdirAll(p2Dir, 0755)
+	_ = os.WriteFile(filepath.Join(p2Dir, "perfil.json"), []byte(`{
+		"name": "p2",
+		"env": {"API_URL": "https://api.v2.com"}
+	}`), 0644)
+
+	store := NewFileStore(WithGlobalDir(globalDir), WithProjectDir(tmpDir))
+	composer := NewComposer(store)
+
+	_, err := composer.Compose([]string{"p1", "p2"})
+	if err == nil {
+		t.Fatal("se esperaba error por colisión de variable de entorno 'API_URL', pero retornó nil")
+	}
+	if !strings.Contains(err.Error(), "colisión de variable de entorno") {
+		t.Errorf("mensaje de error inesperado: %v", err)
+	}
+}
+
 func TestProjector_Project(t *testing.T) {
 	tmpDir := t.TempDir()
 	sourceSkillDir := filepath.Join(tmpDir, "source_skills", "front-react")
