@@ -10,16 +10,16 @@ Cualquier capacidad que desees brindar a agentes de IA (como `agy`, `claude` u `
 
 ```mermaid
 flowchart TD
-    subgraph MCP["Capa de Protocolo (MCP)"]
-        A["Agente de IA (Claude, AGY)"] -->|JSON-RPC 2.0 / Stdio| B["Orchy McpServer"]
+    subgraph MCP ["Capa de Protocolo MCP"]
+        A["Agente de IA (Claude, AGY)"] -->|"JSON-RPC 2.0 / Stdio"| B["Orchy McpServer"]
     end
-    subgraph Kernel["Capa del Microkernel"]
-        B -->|tools/call| C["ToolRegistry"]
-        C --> D["ToolProxy (Circuit Breaker & Métricas)"]
+    subgraph Kernel ["Capa del Microkernel"]
+        B -->|"tools/call"| C["ToolRegistry"]
+        C --> D["ToolProxy (Circuit Breaker y Métricas)"]
     end
-    subgraph Plugin["Capa de Dominio"]
-        D -->|Execute| E["Custom Tool (tools.Tool)"]
-        F["Custom Plugin (plugins.Plugin)"] -->|OnBoot / Registra| C
+    subgraph Plugin ["Capa de Dominio"]
+        D -->|"Execute"| E["Custom Tool (tools.Tool)"]
+        F["Custom Plugin (plugins.Plugin)"] -->|"OnBoot / Registra"| C
     end
 ```
 

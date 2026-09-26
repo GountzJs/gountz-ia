@@ -24,15 +24,15 @@ El runner interactivo del arnés (`OSRunner` (`internal/features/session/session
 
 ```mermaid
 flowchart TD
-    Shell["Shell del Usuario / Terminal TTY"] -->|Ejecuta gz-ia chat| CLI["CLI gz-ia (PID X)"]
-    CLI -->|Conecta Stdin/Stdout/Stderr| Runner["OSRunner"]
-    Runner -->|Inicia proceso hijo| Agent["Agente (agy / claude / opencode) (PID Y)"]
+    Shell["Shell del Usuario / Terminal TTY"] -->|"Ejecuta gz-ia chat"| CLI["CLI gz-ia (PID X)"]
+    CLI -->|"Conecta Stdin/Stdout/Stderr"| Runner["OSRunner"]
+    Runner -->|"Inicia proceso hijo"| Agent["Agente (agy / claude / opencode) (PID Y)"]
     
-    Shell -.->|Ctrl+C (SIGINT)| Agent
-    Agent -->|Retorna código 130| Runner
-    Runner -->|Guarda SessionRecord (StatusFailed / ExitCode 130)| Store["FileStore (.harness/sessions/)"]
-    Runner -->|Propaga Exit Code 130| CLI
-    CLI -->|Exit 130| Shell
+    Shell -.->|"Ctrl+C (SIGINT)"| Agent
+    Agent -->|"Retorna código 130"| Runner
+    Runner -->|"Guarda SessionRecord (StatusFailed / ExitCode 130)"| Store["FileStore (.harness/sessions/)" ]
+    Runner -->|"Propaga Exit Code 130"| CLI
+    CLI -->|"Exit 130"| Shell
 ```
 
 ### Proceso de Terminación Controlada (`session kill`)

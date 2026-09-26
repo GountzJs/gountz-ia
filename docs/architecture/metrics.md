@@ -14,7 +14,7 @@ El paquete `internal/features/metrics` provee agregación y reporte del desempe�
 ```mermaid
 flowchart TD
     AgyTranscript["transcript.jsonl (Antigravity Brain)"] --> Aggregator["Metrics Aggregator"]
-    EventsFile[".events.jsonl & SessionRecord"] --> Aggregator
+    EventsFile[".events.jsonl y SessionRecord"] --> Aggregator
     
     Aggregator --> D1["1. Duración y Tiempo<br/>(Wall-clock time, Tiempo activo)"]
     Aggregator --> D2["2. Pasos y Etapas<br/>(Etapas READ / PENDING / FINISH)"]

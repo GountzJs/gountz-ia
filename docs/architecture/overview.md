@@ -8,31 +8,31 @@
 
 ```mermaid
 flowchart TB
-    subgraph UI ["1. Capa de Clientes & Entrada"]
-        CLI["CLI Commands (spf13/cobra)<br/><code>internal/clients/cli</code>"]
-        TUI["TUI Fastfetch & Forms (Bubble Tea, Lipgloss, Huh)<br/><code>internal/clients/tui</code>"]
+    subgraph UI ["1. Capa de Clientes y Entrada"]
+        CLI["CLI Commands (spf13/cobra) - internal/clients/cli"]
+        TUI["TUI Fastfetch y Forms - internal/clients/tui"]
     end
 
     subgraph CoreFeatures ["2. Capa de Servicios de Dominio (Features)"]
-        SESS["Session Service & Drivers<br/><code>internal/features/session</code>"]
-        WORK["Workspace & Git Worktree Manager<br/><code>internal/features/workspace</code>"]
-        LOG["Event Logger & Bus<br/><code>internal/features/logger</code>"]
-        METR["Metrics & Telemetry Aggregator<br/><code>internal/features/metrics</code>"]
-        UPDT["Release & GitHub Updater<br/><code>internal/features/updater</code>"]
+        SESS["Session Service y Drivers - internal/features/session"]
+        WORK["Workspace y Git Worktree Manager - internal/features/workspace"]
+        LOG["Event Logger y Bus - internal/features/logger"]
+        METR["Metrics y Telemetry Aggregator - internal/features/metrics"]
+        UPDT["Release y GitHub Updater - internal/features/updater"]
     end
 
-    subgraph KernelLayer ["3. Microkernel Orchy (Motor MCP & Plugins)"]
-        KERNEL["Microkernel Core & IoC Container<br/><code>packages/orchy/core</code>"]
-        BUS["Typed Event Bus & RPC<br/><code>packages/orchy/events</code>"]
-        MCP["MCP Stdio Server (JSON-RPC 2.0)<br/><code>packages/orchy/mcp</code>"]
-        TOOLS["Tool Registry & Circuit Breaker<br/><code>packages/orchy/tools</code>"]
-        BATT["Worktree Batteries (Read / Get)<br/><code>packages/orchy/batteries/worktree</code>"]
+    subgraph KernelLayer ["3. Microkernel Orchy (Motor MCP y Plugins)"]
+        KERNEL["Microkernel Core y IoC Container - packages/orchy/core"]
+        BUS["Typed Event Bus y RPC - packages/orchy/events"]
+        MCP["MCP Stdio Server (JSON-RPC 2.0) - packages/orchy/mcp"]
+        TOOLS["Tool Registry y Circuit Breaker - packages/orchy/tools"]
+        BATT["Worktree Batteries (Read) - packages/orchy/batteries/worktree"]
     end
 
-    subgraph Storage ["4. Persistencia Local & Git"]
-        SESS_JSON[".harness/sessions/[id].json"]
-        EVENTS_JSONL[".harness/sessions/[id].events.jsonl"]
-        WORKTREE_DIR[".harness/worktrees/[id] (branch harness/[id])"]
+    subgraph Storage ["4. Persistencia Local y Git"]
+        SESS_JSON[".harness/sessions/{id}.json"]
+        EVENTS_JSONL[".harness/sessions/{id}.events.jsonl"]
+        WORKTREE_DIR[".harness/worktrees/{id} (branch harness/{id})"]
     end
 
     CLI --> SESS
@@ -94,26 +94,26 @@ Un paquete autónomo y reutilizable ubicado en `packages/orchy` que provee:
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User as Usuario / Terminal
-    participant CLI as gz-ia CLI
-    participant Driver as Multi-Driver (agy/claude)
-    participant Work as Workspace Provider
-    participant Git as Git Engine
-    participant Store as Session Store (.harness/)
+    actor User as "Usuario / Terminal"
+    participant CLI as "gz-ia CLI"
+    participant Driver as "Multi-Driver (agy/claude)"
+    participant Work as "Workspace Provider"
+    participant Git as "Git Engine"
+    participant Store as "Session Store (.harness/)"
 
     User->>CLI: gz-ia chat -p agy -m supervised
     CLI->>Driver: Resolver y validar binario (LookPath)
     Driver-->>CLI: Driver disponible (OK)
-    CLI->>Work: Prepare(sessionID)
-    Work->>Git: git worktree add .harness/worktrees/[id] -b harness/[id]
+    CLI->>Work: Prepare sessionID
+    Work->>Git: git worktree add .harness/worktrees/{id} -b harness/{id}
     Git-->>Work: Worktree inicializado
-    CLI->>Store: Create(SessionRecord: RUNNING)
-    Store-->>CLI: Guardado en .harness/sessions/[id].json
+    CLI->>Store: Create SessionRecord RUNNING
+    Store-->>CLI: Guardado en .harness/sessions/{id}.json
     CLI->>Driver: Launch(WorktreePath, SupervisedFlags)
     Note over Driver,User: Sesión interactiva TTY conectada
     Driver->>User: Preguntas y ejecuciones de comandos
-    User-->>Driver: Aprobación / Interacción
+    User-->>Driver: Aprobación e interacción
     Driver-->>CLI: Finalización del proceso (Exit code 0)
-    CLI->>Store: Complete(SessionRecord: COMPLETED)
-    CLI->>User: Sesión completada con éxito. Usa 'gz-ia session get [id]' para integrar.
+    CLI->>Store: Complete SessionRecord COMPLETED
+    CLI->>User: Sesion completada con exito
 ```

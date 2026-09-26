@@ -10,17 +10,17 @@ El ciclo de vida de una sesión sigue una máquina de estados determinista y lib
 
 ```mermaid
 stateDiagram-v2
-    [*] --> RUNNING: gz-ia chat / Launch
-    RUNNING --> COMPLETED: Agente finaliza con código 0
-    RUNNING --> FAILED: Error de ejecución (código != 0)
-    RUNNING --> KILLED: Interrupción forzada (gz-ia session kill / SIGINT)
-    RUNNING --> RUNNING: gz-ia session resume (reconexión TTY)
-    COMPLETED --> RUNNING: gz-ia session resume
-    FAILED --> RUNNING: gz-ia session resume
-    KILLED --> RUNNING: gz-ia session resume
-    COMPLETED --> [*]: gz-ia session delete
-    FAILED --> [*]: gz-ia session delete
-    KILLED --> [*]: gz-ia session delete
+    [*] --> RUNNING: Lanzamiento gz-ia chat
+    RUNNING --> COMPLETED: Agente finaliza con éxito
+    RUNNING --> FAILED: Error de ejecución
+    RUNNING --> KILLED: Interrupción forzada o señal
+    RUNNING --> RUNNING: Reconexión TTY
+    COMPLETED --> RUNNING: Reanudación de sesión
+    FAILED --> RUNNING: Reanudación de sesión
+    KILLED --> RUNNING: Reanudación de sesión
+    COMPLETED --> [*]: Eliminación de sesión
+    FAILED --> [*]: Eliminación de sesión
+    KILLED --> [*]: Eliminación de sesión
 ```
 
 ### Definición de Estados

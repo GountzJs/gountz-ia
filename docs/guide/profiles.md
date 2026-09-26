@@ -104,15 +104,15 @@ El motor de `gz-ia` ejecuta los siguientes pasos dentro del worktree de la sesi�
 flowchart TD
     CLI["gz-ia chat -P frontend,data"] --> Composer["Composer (Validación y Composición)"]
     Composer --> Collision{"¿Colisiones de Nombre o Archivo?"}
-    Collision -- Sí --> Error["Falla Inmediatamente (Fail-Safe)"]
-    Collision -- No --> Projector["Projector"]
+    Collision -->|"Sí"| Error["Falla Inmediatamente (Fail-Safe)"]
+    Collision -->|"No"| Projector["Projector"]
     
-    subgraph Worktree [Worktree de Sesión]
+    subgraph Worktree ["Worktree de Sesión"]
         Projector --> RootMD["AGENTS.md (Generado en Caliente)"]
         Projector --> FrontMD["FRONT-AGENTS.md (Copiado de perfil)"]
         Projector --> DataMD["DATA-AGENTS.md (Copiado de perfil)"]
         Projector --> Symlinks[".agents/skills/ (Symlinks a catálogo central)"]
-        Projector --> MCPConfig[".agents/mcp_config.json & .mcp.json"]
+        Projector --> MCPConfig[".agents/mcp_config.json y .mcp.json"]
     end
 ```
 
@@ -227,3 +227,60 @@ Espacio para seleccionar/deseleccionar perfiles. Enter para continuar.
 ```
 
 Al presionar `Enter`, los perfiles seleccionados se componen y se proyectan automáticamente en el espacio de trabajo del chat.
+
+---
+
+## 7. Ecosistema Global de Tooling Modular (`toolkits/`)
+
+Además de los perfiles `perfil.json`, `gz-ia` soporta un sistema modular de composición de herramientas de IA en `~/.config/gz-ia/tooling/`.
+
+### Estructura de `tooling/`
+
+```text
+~/.config/gz-ia/tooling/
+├── config.json
+└── toolkits/
+    ├── toolkit-rn/
+    │   ├── AGENTS.md
+    │   ├── rules/
+    │   │   └── mobile-arch.md
+    │   ├── skills/
+    │   │   └── react-native-bridge/
+    │   │       └── SKILL.md
+    │   └── tools.json
+    └── toolkit-common/
+        └── rules/
+            └── clean-code.md
+```
+
+### Configuración en `tooling/config.json`
+
+```json
+{
+  "version": 1,
+  "perfiles": [
+    {
+      "name": "Programador React Native",
+      "description": "Desarrollo móvil y puente nativo",
+      "toolkits": ["toolkit-rn", "toolkit-common"]
+    }
+  ]
+}
+```
+
+### El Microkernel Orchy como Servidor MCP Propio
+
+En lugar de requerir que el usuario configure servidores MCP externos manualmente, `gz-ia` actúa como su propio servidor MCP:
+1. Al crear el worktree de la sesión, `gz-ia` genera `.mcp.json` y `.agents/mcp_config.json` apuntando a:
+   ```json
+   {
+     "mcpServers": {
+       "gz-ia": {
+         "command": "gz-ia",
+         "args": ["mcp", "--session", "<session-id>"]
+       }
+     }
+   }
+   ```
+2. Cuando el agente (`agy`, `claude`) ejecuta una llamada de herramienta, `gz-ia mcp` arranca el microkernel Orchy, monta las herramientas declaradas en los toolkits activos y las baterías seguras (`worktree_read`) protegidas por Circuit Breaker.
+

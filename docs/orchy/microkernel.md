@@ -24,10 +24,10 @@ El microkernel implementa una máquina de estados estricta para garantizar inici
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> Booting: Kernel.Boot()
-    Booting --> Running: Plugins OnBoot() completados
-    Running --> ShuttingDown: Kernel.Shutdown() / Señal POSIX
-    ShuttingDown --> Stopped: Plugins OnShutdown() completados
+    Idle --> Booting: Kernel Boot
+    Booting --> Running: Plugins OnBoot completados
+    Running --> ShuttingDown: Kernel Shutdown o señal
+    ShuttingDown --> Stopped: Plugins OnShutdown completados
     Stopped --> [*]
 ```
 
@@ -63,10 +63,10 @@ Cada herramienta registrada en el `ToolRegistry` es envuelta automáticamente po
 ```mermaid
 stateDiagram-v2
     direction LR
-    HEALTHY --> DEGRADED: Errores esporádicos o alta latencia
-    DEGRADED --> HEALTHY: Invocaciones exitosas consecutivas
-    DEGRADED --> DEAD: Fallos continuos > umbral
-    DEAD --> DEGRADED: Health check / reset manual
+    HEALTHY --> DEGRADED: Errores esporádicos o latencia
+    DEGRADED --> HEALTHY: Invocaciones exitosas
+    DEGRADED --> DEAD: Fallos continuos exceden umbral
+    DEAD --> DEGRADED: Health check o reset
 ```
 
 ### Los 3 Estados de Salud (`ToolStatus`)

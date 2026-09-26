@@ -13,10 +13,10 @@ Las tareas y subtareas se registran siguiendo 3 etapas secuenciales:
 ```mermaid
 stateDiagram-v2
     direction LR
-    [*] --> READ: Exploración & Contexto
-    READ --> PENDING: Ejecución & Mutación
-    PENDING --> FINISH_OK: Éxito (status: OK)
-    PENDING --> FINISH_FAILED: Fallo (status: FAILED)
+    [*] --> READ: Exploracion y Contexto
+    READ --> PENDING: Ejecucion y Modificacion
+    PENDING --> FINISH_OK: Exito OK
+    PENDING --> FINISH_FAILED: Fallo FAILED
     FINISH_OK --> [*]
     FINISH_FAILED --> [*]
 ```

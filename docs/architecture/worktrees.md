@@ -43,18 +43,18 @@ A diferencia de un `git clone`:
 flowchart TD
     Init["Inicio de Sesión (gz-ia chat)"] --> CheckGit{"¿Es un repo Git válido?"}
     
-    CheckGit -- Sí --> CreateWT["Crear Worktree:<br/>git worktree add -b harness/[id] .harness/worktrees/[id] HEAD"]
-    CheckGit -- No --> Fallback["Modo Fallback Directo<br/>(Opera en el directorio actual)"]
+    CheckGit -->|"Sí"| CreateWT["Crear Worktree:<br/>git worktree add -b harness/{id} .harness/worktrees/{id} HEAD"]
+    CheckGit -->|"No"| Fallback["Modo Fallback Directo<br/>(Opera en el directorio actual)"]
     
-    CreateWT --> AgentRun["Agente opera dentro de .harness/worktrees/[id]"]
+    CreateWT --> AgentRun["Agente opera dentro de .harness/worktrees/{id}"]
     Fallback --> AgentRun
     
-    AgentRun --> Audit["Inspección Humana:<br/>gz-ia session read [id]<br/>gz-ia session diff [id]"]
+    AgentRun --> Audit["Inspección Humana:<br/>gz-ia session read {id}<br/>gz-ia session diff {id}"]
     
     Audit --> Decision{"¿Integrar cambios?"}
     
-    Decision -- Integrar --> Get["Integración Humana:<br/>gz-ia session get [id]"]
-    Decision -- Descartar --> Delete["Limpieza de Sesión:<br/>gz-ia session delete [id]"]
+    Decision -->|"Integrar"| Get["Integración Humana:<br/>gz-ia session get {id}"]
+    Decision -->|"Descartar"| Delete["Limpieza de Sesión:<br/>gz-ia session delete {id}"]
     
     Get --> Delete
 ```

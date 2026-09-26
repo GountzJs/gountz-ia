@@ -10,10 +10,10 @@ En proyectos en producción, permitir que un agente de IA modifique directamente
 
 ```mermaid
 flowchart LR
-    A[Workspace Activo] -->|1. gz-ia chat| B[Git Worktree Aislado]
-    B -->|2. Refactorización en Segundo Plano| B
-    A -->|3. gz-ia session read --stat| B
-    B -->|4. gz-ia session get --no-commit| A
+    A["Workspace Activo"] -->|"1. gz-ia chat"| B["Git Worktree Aislado"]
+    B -->|"2. Refactorización en Segundo Plano"| B
+    A -->|"3. gz-ia session read --stat"| B
+    B -->|"4. gz-ia session get --no-commit"| A
 ```
 
 ### Paso 1: Lanzar la sesión de refactorización

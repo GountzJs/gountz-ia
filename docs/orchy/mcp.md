@@ -22,23 +22,21 @@ El servidor MCP procesa los siguientes métodos del protocolo estándar:
 ```mermaid
 sequenceDiagram
     autonumber
-    actor LLM as Agente de IA (Cliente MCP)
-    participant Server as Orchy McpServer (Stdio)
-    participant Registry as ToolRegistry & Proxy
+    actor LLM as "Agente de IA (Cliente MCP)"
+    participant Server as "Orchy McpServer (Stdio)"
+    participant Registry as "ToolRegistry y Proxy"
 
     LLM->>Server: initialize (JSON-RPC 2.0)
-    Server-->>LLM: serverInfo & capabilities (tools)
-
+    Server-->>LLM: serverInfo y capabilities
     LLM->>Server: tools/list
     Server->>Registry: Obtener herramientas activas
-    Registry-->>Server: [worktree_read]
+    Registry-->>Server: Catálogo con worktree_read
     Server-->>LLM: tools catalog
-
-    LLM->>Server: tools/call (worktree_read, session_id)
-    Server->>Registry: Execute(worktree_read, args)
+    LLM->>Server: tools/call worktree_read
+    Server->>Registry: Execute worktree_read
     Note over Registry: Protegido por Circuit Breaker
     Registry-->>Server: Resultado de lectura
-    Server-->>LLM: result content (diff)
+    Server-->>LLM: result content diff
 ```
 
 ---

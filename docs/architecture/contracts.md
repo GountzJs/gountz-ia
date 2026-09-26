@@ -7,86 +7,29 @@ La arquitectura de `gz-ia` está diseñada bajo los principios de **Inversión d
 ## 1. Mapa de Interfaces del Sistema
 
 ```mermaid
-classDiagram
-    class SessionService {
-        <<Interface>>
-        +StartChat(ctx, req) error
-        +List(ctx) []SessionRecord
-        +GetRecord(ctx, id) *SessionRecord
-        +Kill(ctx, id) error
-        +Resume(ctx, id) error
-        +Delete(ctx, id) error
-        +Path(ctx, id) string
-        +Diff(ctx, id, statOnly) string
-        +Merge(ctx, id, opts) *MergeResult
-        +Metrics(ctx, id) *SessionMetrics
-        +LogEvent(ctx, evt) error
-        +WatchEvents(ctx, id) <-chan Event
-    }
+flowchart TD
+    subgraph Core ["Servicios de Dominio (internal/features)"]
+        SS["SessionService<br/>(Ciclo de Vida de Sesión)"]
+        WS["WorkspaceProvider<br/>(Git Worktrees y Aislamiento)"]
+        LS["LoggerService<br/>(Registro de Eventos .events.jsonl)"]
+        MS["MetricsService<br/>(Telemetría y Desglose Tokens)"]
+        US["UpdaterService<br/>(Actualización Atómica)"]
+    end
 
-    class SessionStore {
-        <<Interface>>
-        +Save(s) error
-        +Get(id) *SessionRecord
-        +List() []SessionRecord
-        +Delete(id) error
-    }
+    subgraph Adapters ["Adaptadores y Componentes"]
+        Store["SessionStore (FileStore)"]
+        Runner["SessionRunner (OSRunner)"]
+        Killer["ProcessKiller (OSProcessKiller)"]
+        Driver["AgentDriver (Agy / Claude / OpenCode / Pi-Agent)"]
+    end
 
-    class SessionRunner {
-        <<Interface>>
-        +Run(ctx, binary, args, dir, onStart) (int, error)
-    }
-
-    class ProcessKiller {
-        <<Interface>>
-        +Kill(pid) error
-    }
-
-    class AgentDriver {
-        <<Interface>>
-        +ID() string
-        +DisplayName() string
-        +BinaryName() string
-        +IsAvailable() bool
-        +InstallHint() string
-        +BuildArgs(cfg) []string
-    }
-
-    class WorkspaceProvider {
-        <<Interface>>
-        +IsGitAvailable(ctx, dir) bool
-        +ResolveProjectRoot(ctx, dir) string
-        +Prepare(ctx, sessionID, baseDir) *Workspace
-        +Cleanup(ctx, ws) error
-        +DiffWorktree(ctx, baseDir, worktreeDir, branch, statOnly) string
-        +MergeWorktree(ctx, sessionID, baseDir, worktreeDir, branch, squash, noCommit) *MergeResult
-    }
-
-    class LoggerService {
-        <<Interface>>
-        +Emit(ctx, evt) error
-        +GetEvents(ctx, sessionID) []Event
-        +Watch(ctx, sessionID) <-chan Event
-    }
-
-    class MetricsService {
-        <<Interface>>
-        +GetMetrics(ctx, sessionID, workDir) *SessionMetrics
-    }
-
-    class UpdaterService {
-        <<Interface>>
-        +CheckLatest(ctx) *ReleaseInfo
-        +Update(ctx, targetVer, installDir) *UpdateResult
-    }
-
-    SessionService ..> SessionStore : delega persistencia
-    SessionService ..> SessionRunner : ejecuta TTY
-    SessionService ..> ProcessKiller : gestiona señales POSIX
-    SessionService ..> WorkspaceProvider : aísla worktrees
-    SessionService ..> LoggerService : emite auditoría
-    SessionService ..> MetricsService : extrae telemetría
-    SessionRunner ..> AgentDriver : resuelve binarios y flags
+    SS --> Store
+    SS --> Runner
+    SS --> Killer
+    SS --> WS
+    SS --> LS
+    SS --> MS
+    Runner --> Driver
 ```
 
 ---
@@ -197,15 +140,15 @@ Para prevenir estados inconsistentes ante fallos de alimentación, interrupcione
 
 ```mermaid
 sequenceDiagram
-    participant Svc as SessionService
-    participant Store as FileStore
-    participant FS as Sistema de Archivos (.harness/sessions/)
+    participant Svc as "SessionService"
+    participant Store as "FileStore"
+    participant FS as "Sistema de Archivos (.harness/sessions/)"
 
     Svc->>Store: Save(record)
-    Store->>FS: os.MkdirAll(.harness/sessions, 0755)
-    Store->>FS: json.MarshalIndent(record)
-    Store->>FS: os.WriteFile("<id>.json.tmp", data, 0644)
-    Store->>FS: os.Rename("<id>.json.tmp", "<id>.json")
+    Store->>FS: os.MkdirAll
+    Store->>FS: json.MarshalIndent
+    Store->>FS: os.WriteFile archivo temporal
+    Store->>FS: os.Rename sobre destino final
     Note over FS: Operación atómica de kernel (inodo intercambiado)
     FS-->>Store: Retorna nil
     Store-->>Svc: Confirmación de persistencia
@@ -488,12 +431,12 @@ La función `NormalizeVersion` elimina prefijos de tag comunes (`tag/` o `v`) pa
 ```mermaid
 flowchart TD
     Update["gz-ia update"] --> Check["CheckLatest(ctx)"]
-    Check --> GH["Consultar GitHub Releases API (GZ_GITHUB_API_URL)"]
-    GH -->|Éxito| Found["Última versión detectada"]
-    GH -->|Fallo| Err["Retorna error descriptivo"]
+    Check --> GH["Consultar GitHub Releases API"]
+    GH -->|"Éxito"| Found["Última versión detectada"]
+    GH -->|"Fallo"| Err["Retorna error descriptivo"]
     
-    Found --> Download["Descargar asset .tar.gz desde GitHub Releases"]
-    Download --> Stream["Descomprimir stream gzip + tar"]
+    Found --> Download["Descargar asset .tar.gz"]
+    Download --> Stream["Descomprimir stream gzip y tar"]
     Stream --> Replace["Reemplazo atómico en installDir"]
 ```
 

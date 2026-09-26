@@ -78,7 +78,7 @@ El arnés valida las transiciones entre etapas:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> READ: Inicio de lectura/contexto
+    [*] --> READ: Inicio de lectura y contexto
     READ --> PENDING: Modificación en progreso
     PENDING --> FINISH: Conclusión de la tarea
     FINISH --> [*]
