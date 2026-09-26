@@ -45,7 +45,7 @@ features:
     link: /architecture/observability
   - icon: 🚀
     title: Distribución & Actualización
-    details: Instalación directa en un comando desde repositorios Nexus/Forgejo y actualización transparente in-place mediante `gz-ia update`.
+    details: Instalación directa en un comando mediante `curl` desde GitHub Releases y actualización transparente in-place mediante `gz-ia update`.
     link: /guide/quickstart
 ---
 
