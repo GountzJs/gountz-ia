@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"gz-ia/internal/features/logger"
 	"gz-ia/internal/features/profile"
+	"gz-ia/internal/features/tooling"
 	"gz-ia/internal/features/vault"
 	"gz-ia/internal/features/workspace"
 	"os"
@@ -163,6 +164,7 @@ type Session struct {
 	Logger    logger.Service
 	Profile   profile.Service
 	Vault     vault.Service
+	Tooling   tooling.Service
 }
 
 // New crea una nueva instancia de Session con runner y store inyectados.
@@ -212,6 +214,12 @@ func (s *Session) WithProfile(p profile.Service) *Session {
 // WithVault permite inyectar un servicio de vault para cargar variables de entorno seguras.
 func (s *Session) WithVault(v vault.Service) *Session {
 	s.Vault = v
+	return s
+}
+
+// WithTooling permite inyectar un servicio de tooling modular.
+func (s *Session) WithTooling(t tooling.Service) *Session {
+	s.Tooling = t
 	return s
 }
 
@@ -267,6 +275,23 @@ func (s *Session) Start(ctx context.Context) error {
 		}
 		if err := s.Profile.Project(ctx, ws.TargetDir, composed, s.Config.ID, s.Config.Provider); err != nil {
 			return fmt.Errorf("error al proyectar perfiles en el workspace: %w", err)
+		}
+	}
+
+	// Proyectar tooling modular (toolkits, skills, rules, directives y MCP)
+	if s.Tooling != nil && len(s.Config.Profiles) > 0 {
+		var activeToolkitIDs []string
+		for _, profName := range s.Config.Profiles {
+			if profCfg, err := s.Tooling.GetProfile(ctx, profName); err == nil && profCfg != nil {
+				activeToolkitIDs = append(activeToolkitIDs, profCfg.Toolkits...)
+			}
+		}
+		if len(activeToolkitIDs) > 0 {
+			if composedTooling, err := s.Tooling.ComposeToolkits(ctx, activeToolkitIDs); err == nil && composedTooling != nil {
+				if projErr := s.Tooling.ProjectIntoWorktree(ctx, ws.TargetDir, composedTooling, s.Config.ID); projErr != nil {
+					return fmt.Errorf("error al proyectar tooling en el worktree: %w", projErr)
+				}
+			}
 		}
 	}
 

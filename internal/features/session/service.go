@@ -12,6 +12,7 @@ import (
 	"gz-ia/internal/features/logger"
 	"gz-ia/internal/features/metrics"
 	"gz-ia/internal/features/profile"
+	"gz-ia/internal/features/tooling"
 	"gz-ia/internal/features/vault"
 	"gz-ia/internal/features/workspace"
 )
@@ -73,10 +74,18 @@ type sessionService struct {
 	logger    logger.Service
 	profile   profile.Service
 	vault     vault.Service
+	tooling   tooling.Service
 }
 
 // Option permite configurar dependencias opcionales en NewService.
 type Option func(*sessionService)
+
+// WithTooling inyecta un servicio de tooling modular personalizado.
+func WithTooling(t tooling.Service) Option {
+	return func(svc *sessionService) {
+		svc.tooling = t
+	}
+}
 
 // WithVault inyecta un servicio de vault personalizado.
 func WithVault(v vault.Service) Option {
@@ -180,6 +189,10 @@ func NewService(workDir string, opts ...Option) Service {
 
 	if svc.vault == nil {
 		svc.vault = vault.NewService(svc.workDir)
+	}
+
+	if svc.tooling == nil {
+		svc.tooling = tooling.NewService()
 	}
 
 	return svc
@@ -286,7 +299,8 @@ func (s *sessionService) StartChat(ctx context.Context, req StartChatRequest) er
 		WithWorkspace(s.workspace).
 		WithLogger(s.logger).
 		WithProfile(s.profile).
-		WithVault(s.vault)
+		WithVault(s.vault).
+		WithTooling(s.tooling)
 	return sess.Start(ctx)
 }
 

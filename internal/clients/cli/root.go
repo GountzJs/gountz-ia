@@ -34,6 +34,7 @@ de flujos agénticos modulares en Go.`,
 	cmd.AddCommand(newProfileCmd())
 	cmd.AddCommand(newVaultCmd())
 	cmd.AddCommand(newUpdateCmd())
+	cmd.AddCommand(newMcpCmd())
 
 	return cmd
 }

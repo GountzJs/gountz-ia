@@ -8,6 +8,7 @@ import (
 
 	"gz-ia/internal/clients/tui"
 	"gz-ia/internal/features/profile"
+	"gz-ia/internal/features/tooling"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -46,9 +47,12 @@ func newProfileCmd() *cobra.Command {
 				return err
 			}
 
+			toolingSvc := tooling.NewService()
+			toolingProfiles, _ := toolingSvc.ListProfiles(c.Context())
+
 			icons := tui.GetIcons()
-			if len(profiles) == 0 {
-				fmt.Fprintln(c.OutOrStdout(), lipgloss.NewStyle().Foreground(tui.ColorMuted).Render(fmt.Sprintf("%s No hay perfiles agénticos registrados (en ~/.config/gz-ia/profiles ni .harness/profiles).", icons.Sparkle)))
+			if len(profiles) == 0 && len(toolingProfiles) == 0 {
+				fmt.Fprintln(c.OutOrStdout(), lipgloss.NewStyle().Foreground(tui.ColorMuted).Render(fmt.Sprintf("%s No hay perfiles agénticos registrados (en ~/.config/gz-ia/profiles, .harness/profiles ni tooling/config.json).", icons.Sparkle)))
 				return nil
 			}
 
@@ -84,6 +88,24 @@ func newProfileCmd() *cobra.Command {
 				)
 				fmt.Fprintln(c.OutOrStdout(), row)
 			}
+
+			for _, tp := range toolingProfiles {
+				scopeBadge := "tooling"
+				scopeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00D7AF"))
+				toolkitsCount := fmt.Sprintf("%d toolkits", len(tp.Toolkits))
+				desc := tp.Description
+				if len(desc) > 28 {
+					desc = desc[:25] + "..."
+				}
+				row := fmt.Sprintf("%-16s  %-28s  %-8s  %-18s  %-8s",
+					lipgloss.NewStyle().Bold(true).Render(tp.Name),
+					desc,
+					toolkitsCount,
+					"-",
+					scopeStyle.Render(scopeBadge),
+				)
+				fmt.Fprintln(c.OutOrStdout(), row)
+			}
 			return nil
 		},
 	}
@@ -99,6 +121,16 @@ func newProfileCmd() *cobra.Command {
 			svc := getProfileService(workDir)
 			p, err := svc.GetProfile(c.Context(), name)
 			if err != nil {
+				toolingSvc := tooling.NewService()
+				if tp, tpErr := toolingSvc.GetProfile(c.Context(), name); tpErr == nil && tp != nil {
+					icons := tui.GetIcons()
+					fmt.Fprintln(c.OutOrStdout(), lipgloss.NewStyle().Bold(true).Foreground(tui.ColorSecondary).Render(fmt.Sprintf("%s Perfil de Tooling: %s", icons.Sparkle, tp.Name)))
+					fmt.Fprintln(c.OutOrStdout(), lipgloss.NewStyle().Foreground(tui.ColorSubtle).Render("────────────────────────────────────────────────────────────────────────"))
+					fmt.Fprintf(c.OutOrStdout(), "  Descripción:  %s\n", tp.Description)
+					fmt.Fprintf(c.OutOrStdout(), "  Ámbito:       global (tooling)\n")
+					fmt.Fprintf(c.OutOrStdout(), "  Toolkits:     %s\n", strings.Join(tp.Toolkits, ", "))
+					return nil
+				}
 				return err
 			}
 

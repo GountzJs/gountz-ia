@@ -31,6 +31,7 @@ Guía detallada de sintaxis, argumentos, banderas y códigos de retorno de todos
 | [`gz-ia session logs`](#gz-ia-session-logs) | `<id>`<br>`-f, --follow`<br>`--json`<br>`-d, --dir` | N/A | Consulta histórica o transmisión en vivo de los eventos de una sesión. |
 | [`gz-ia session prune`](#gz-ia-session-prune) | `-d, --dir` | N/A | Reconcilia y elimina sesiones, ramas de Git y worktrees huérfanos. |
 | [`gz-ia vault`](#gz-ia-vault) | `list`, `set`, `get`, `delete`, `path`<br>`-d, --dir` | N/A | Gestiona secretos y variables de entorno centralizadas (`.harness/vault.json`). |
+| [`gz-ia mcp`](#gz-ia-mcp) | `--session`<br>`--tooling`<br>`--profile`<br>`--toolkit`<br>`--allow-get`<br>`-d, --dir` | N/A | Inicia el servidor MCP nativo de gz-ia sobre Stdio (JSON-RPC 2.0). |
 | [`gz-ia update`](#gz-ia-update) | `-c, --check`<br>`-f, --force`<br>`--version`<br>`--install-dir` | N/A | Verifica e instala la última versión de `gz-ia` desde GitHub Releases. |
 | [`gz-ia version`](#gz-ia-version) | N/A | N/A | Muestra la versión, commit SHA y fecha de compilación. |
 
@@ -297,6 +298,26 @@ gz-ia vault delete <VARIABLE>
 # Imprimir la ruta física del archivo vault.json
 gz-ia vault path
 ```
+
+---
+
+### `gz-ia mcp`
+
+Inicia el servidor MCP nativo de `gz-ia` sobre Stdio (JSON-RPC 2.0).
+
+El arnés actúa como su propio servidor MCP para agentes de IA como Google Antigravity (`agy`) o Claude Code (`claude`), exponiendo herramientas del microkernel Orchy (como `worktree_read`) y las herramientas de los toolkits declarados en `~/.config/gz-ia/tooling/`.
+
+```bash
+gz-ia mcp [flags]
+```
+
+**Banderas (Flags):**
+- `--session <id>`: Identificador de la sesión de trabajo activa. Si la sesión es aislada, opera en su worktree `.harness/worktrees/<id>`.
+- `--tooling <ruta>`: Directorio de tooling global (por defecto `~/.config/gz-ia/tooling`).
+- `-P, --profile <nombre>`: Perfil agéntico de tooling a activar.
+- `--toolkit <id>`: Toolkits específicos a incorporar al microkernel.
+- `--allow-get`: Permite exponer la herramienta `worktree_get` al agente (por defecto `false` por seguridad).
+- `-d, --dir <ruta>`: Directorio de trabajo base.
 
 ---
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -2371,6 +2372,55 @@ func TestVaultCmd_Lifecycle(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "no encontrada") {
 		t.Errorf("se esperaba mensaje de no encontrada: %s", buf.String())
+	}
+}
+
+func TestMcpCmd_Protocol(t *testing.T) {
+	tmpDir := t.TempDir()
+	toolingDir := filepath.Join(tmpDir, "tooling")
+	tkDir := filepath.Join(toolingDir, "toolkits", "test-tk")
+	_ = os.MkdirAll(tkDir, 0755)
+
+	// Crear tools.json
+	toolsJSON := `[{"name": "test_mcp_echo", "description": "Echo tool", "command": "echo '{\"status\": \"ok\"}'"}]`
+	_ = os.WriteFile(filepath.Join(tkDir, "tools.json"), []byte(toolsJSON), 0644)
+
+	// Crear config.json con un perfil
+	cfgJSON := `{
+		"version": 1,
+		"perfiles": [
+			{"name": "mcp-test-prof", "toolkits": ["test-tk"]}
+		]
+	}`
+	_ = os.WriteFile(filepath.Join(toolingDir, "config.json"), []byte(cfgJSON), 0644)
+
+	// JSON-RPC requests
+	initReq := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0.0"}}}` + "\n"
+	listReq := `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}` + "\n"
+
+	inBuf := bytes.NewBufferString(initReq + listReq)
+	outBuf := &bytes.Buffer{}
+
+	cmd := NewRootCmd()
+	cmd.SetIn(inBuf)
+	cmd.SetOut(outBuf)
+	cmd.SetArgs([]string{
+		"mcp",
+		"--dir", tmpDir,
+		"--tooling", toolingDir,
+		"--profile", "mcp-test-prof",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("mcp command falló: %v", err)
+	}
+
+	outStr := outBuf.String()
+	if !strings.Contains(outStr, "worktree_read") {
+		t.Errorf("Se esperaba que tools/list incluyera 'worktree_read', obtenido:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "test_mcp_echo") {
+		t.Errorf("Se esperaba que tools/list incluyera 'test_mcp_echo', obtenido:\n%s", outStr)
 	}
 }
 
