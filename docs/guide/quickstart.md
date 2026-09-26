@@ -56,7 +56,7 @@ Comprueba que el binario responda adecuadamente con su versión:
 
 ```bash
 $ gz-ia version
-✦ gz-ia v0.0.1 (commit: a1b2c3d, date: 2026-09-24T20:00:00Z)
+✦ gz-ia v0.0.2 (commit: ceed405, date: 2026-09-26T20:40:19Z)
 ```
 
 ---

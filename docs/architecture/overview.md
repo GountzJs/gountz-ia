@@ -18,6 +18,8 @@ flowchart TB
         WORK["Workspace y Git Worktree Manager - internal/features/workspace"]
         LOG["Event Logger y Bus - internal/features/logger"]
         METR["Metrics y Telemetry Aggregator - internal/features/metrics"]
+        VAULT["Secret Vault y Envs - internal/features/vault"]
+        TOOL["Modular Tooling y Perfiles - internal/features/tooling"]
         UPDT["Release y GitHub Updater - internal/features/updater"]
     end
 
@@ -31,7 +33,9 @@ flowchart TB
 
     subgraph Storage ["4. Persistencia Local y Git"]
         SESS_JSON[".harness/sessions/{id}.json"]
+        SESS_MANIFEST[".harness/sessions/{id}.manifest.json"]
         EVENTS_JSONL[".harness/sessions/{id}.events.jsonl"]
+        VAULT_JSON[".harness/vault.json (Permisos 0600)"]
         WORKTREE_DIR[".harness/worktrees/{id} (branch harness/{id})"]
     end
 
@@ -39,14 +43,19 @@ flowchart TB
     CLI --> WORK
     CLI --> LOG
     CLI --> METR
+    CLI --> VAULT
+    CLI --> TOOL
     CLI --> UPDT
     TUI --> CLI
 
     SESS --> WORK
     SESS --> LOG
     SESS --> METR
+    SESS --> VAULT
     SESS --> SESS_JSON
+    SESS --> SESS_MANIFEST
     LOG --> EVENTS_JSONL
+    VAULT --> VAULT_JSON
     WORK --> WORKTREE_DIR
 
     SESS -.-> KERNEL
@@ -65,7 +74,7 @@ flowchart TB
 
 Esta capa maneja la interacción directa con el usuario, procesa argumentos y formatea las respuestas:
 
-- **`internal/clients/cli`:** Construida sobre `spf13/cobra`. Proporciona el árbol completo de comandos y subcomandos (`chat`, `session`, `update`, `version`). No contiene lógica de negocio; valida parámetros e invoca a los servicios de dominio.
+- **`internal/clients/cli`:** Construida sobre `spf13/cobra`. Proporciona el árbol completo de comandos y subcomandos (`chat`, `session`, `vault`, `mcp`, `update`, `version`). No contiene lógica de negocio; valida parámetros e invoca a los servicios de dominio.
 - **`internal/clients/tui`:** Construida con `charmbracelet/bubbletea`, `lipgloss` y `huh`. Proporciona la experiencia visual guiada con menús accesibles, banners de telemetría y diálogos interactivos de confirmación.
 
 ### 2. Capa de Servicios de Dominio (`internal/features/`)
@@ -73,7 +82,9 @@ Esta capa maneja la interacción directa con el usuario, procesa argumentos y fo
 El núcleo operativo de la CLI de `gz-ia`, completamente desacoplado de la terminal:
 
 - **`session` (`internal/features/session`):** Orquesta el ciclo de vida de cada sesión, gestiona los drivers de los agentes (`agy`, `claude`, `opencode`, `pi-agent`), controla procesos en segundo plano y almacena atómicamente la metadata en `.harness/sessions/<id>.json`.
-- **`workspace` (`internal/features/workspace`):** Administra el ciclo de vida de los **Git Worktrees** efímeros, la creación de ramas `harness/<id>` y el fallback seguro en directorios planos si Git no está inicializado.
+- **`workspace` (`internal/features/workspace`):** Administra el ciclo de vida de los **Git Worktrees** efímeros, la creación de ramas `harness/<id>`, el manifiesto de proyección atómico (`.manifest.json`) y el fallback seguro en directorios planos si Git no está inicializado.
+- **`vault` (`internal/features/vault`):** Almacén seguro de secretos y variables de entorno centralizadas (`.harness/vault.json` con permisos `0600`), enmascaramiento de valores y detección automática de credenciales faltantes.
+- **`tooling` (`internal/features/tooling`):** Gestión y composición de perfiles agénticos y toolkits modulares (`tooling/config.json`, directivas `AGENTS.md`, `rules/`, `skills/` y registro dinámico de herramientas en el microkernel).
 - **`logger` (`internal/features/logger`):** Captura y persiste el log estructurado de etapas de razonamiento y acciones en formato JSONL (`.events.jsonl`).
 - **`metrics` (`internal/features/metrics`):** Agrega y analiza métricas de ejecución: duración total, pasos completados, consumo de tokens (input, output, caché) y llamadas a herramientas por cada agente y subagente.
 - **`updater` (`internal/features/updater`):** Comprueba actualizaciones y nuevas versiones publicadas en GitHub Releases, gestiona descargas y reemplaza atómicamente el ejecutable.

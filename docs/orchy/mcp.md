@@ -84,3 +84,22 @@ func main() {
     }
 }
 ```
+
+---
+
+## Servidor Desacoplado vía CLI (`gz-ia mcp`)
+
+Además del uso programático en Go, `gz-ia` expone el servidor MCP completo directamente desde la terminal mediante el comando `gz-ia mcp`:
+
+```bash
+gz-ia mcp --session <session-id> --tooling ~/.config/gz-ia/tooling
+```
+
+### Integración con Toolkits Modulares
+
+El comando desacoplado inicializa dinámicamente el microkernel Orchy y realiza los siguientes pasos:
+1. **Resolución de Sesión:** Si se suministra `--session <id>`, inspecciona el `SessionRecord` y sitúa el target de ejecución dentro de `.harness/worktrees/<id>`.
+2. **Registro de Baterías de Worktree:** Registra automáticamente `worktree_read` (y condicionalmente `worktree_get` si se especifica `--allow-get`).
+3. **Carga y Composición de Toolkits:** Utiliza el servicio `features/tooling` para leer `tooling/config.json`, componer directivas `AGENTS.md`, asociar `rules/` y `skills/`, e instanciar adaptadores de herramientas declaradas en `tools.json` dentro del microkernel.
+4. **Protección por Circuit Breaker:** Cada herramienta inyectada queda automáticamente supervisada por un `ToolProxy` que reporta estados honestos (`HEALTHY`, `DEGRADED`, `DEAD`).
+5. **Servicio JSON-RPC 2.0:** Escucha en `os.Stdin` y responde en `os.Stdout`, actuando como backend MCP nativo para agentes de IA de cualquier proveedor.

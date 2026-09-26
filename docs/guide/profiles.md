@@ -232,7 +232,7 @@ Al presionar `Enter`, los perfiles seleccionados se componen y se proyectan auto
 
 ## 7. Ecosistema Global de Tooling Modular (`toolkits/`)
 
-Además de los perfiles `perfil.json`, `gz-ia` soporta un sistema modular de composición de herramientas de IA en `~/.config/gz-ia/tooling/`.
+Además de los perfiles clásicos `perfil.json`, `gz-ia` cuenta con un subsistema avanzado de composición de herramientas de IA (`internal/features/tooling`) alojado en `~/.config/gz-ia/tooling/` (o la ruta provista vía `--tooling`).
 
 ### Estructura de `tooling/`
 
@@ -241,13 +241,13 @@ Además de los perfiles `perfil.json`, `gz-ia` soporta un sistema modular de com
 ├── config.json
 └── toolkits/
     ├── toolkit-rn/
-    │   ├── AGENTS.md
+    │   ├── AGENTS.md                  # Directivas base del toolkit
     │   ├── rules/
-    │   │   └── mobile-arch.md
+    │   │   └── mobile-arch.md         # Reglas arquitectónicas complementarias
     │   ├── skills/
-    │   │   └── react-native-bridge/
+    │   │   └── react-native-bridge/   # Skills proyectadas
     │   │       └── SKILL.md
-    │   └── tools.json
+    │   └── tools.json                 # Declaración de herramientas MCP ejecutables
     └── toolkit-common/
         └── rules/
             └── clean-code.md
@@ -255,32 +255,55 @@ Además de los perfiles `perfil.json`, `gz-ia` soporta un sistema modular de com
 
 ### Configuración en `tooling/config.json`
 
+El descriptor `config.json` agrupa toolkits reutilizables en perfiles modulares:
+
 ```json
 {
   "version": 1,
   "perfiles": [
     {
       "name": "Programador React Native",
-      "description": "Desarrollo móvil y puente nativo",
+      "description": "Desarrollo móvil, puente nativo y buenas prácticas",
       "toolkits": ["toolkit-rn", "toolkit-common"]
     }
   ]
 }
 ```
 
-### El Microkernel Orchy como Servidor MCP Propio
+Cada toolkit puede definir:
+- **`AGENTS.md` y `rules/*.md`:** Directivas que se componen y proyectan automáticamente en el espacio de trabajo del agente.
+- **`skills/<nombre>/SKILL.md`:** Capacidades y procedimientos especializados enlazados a `.agents/skills/`.
+- **`tools.json`:** Herramientas ejecutables que implementan el protocolo JSON-RPC 2.0 y se cargan dinámicamente como adaptadores de herramientas en el microkernel Orchy.
 
-En lugar de requerir que el usuario configure servidores MCP externos manualmente, `gz-ia` actúa como su propio servidor MCP:
-1. Al crear el worktree de la sesión, `gz-ia` genera `.mcp.json` y `.agents/mcp_config.json` apuntando a:
-   ```json
-   {
-     "mcpServers": {
-       "gz-ia": {
-         "command": "gz-ia",
-         "args": ["mcp", "--session", "<session-id>"]
-       }
-     }
-   }
-   ```
-2. Cuando el agente (`agy`, `claude`) ejecuta una llamada de herramienta, `gz-ia mcp` arranca el microkernel Orchy, monta las herramientas declaradas en los toolkits activos y las baterías seguras (`worktree_read`) protegidas por Circuit Breaker.
+### El Microkernel Orchy como Servidor MCP Desacoplado
+
+En lugar de depender de configuraciones complejas o servidores MCP externos, `gz-ia` ejecuta su propio servidor MCP embebido:
+
+```bash
+# Servidor MCP desacoplado por Stdio vinculado a una sesión específica
+gz-ia mcp --session <id> --tooling ~/.config/gz-ia/tooling
+```
+
+#### Parámetros soportados:
+- `--session <id>`: Identificador de la sesión activa. Si la sesión está aislada, el servidor vincula automáticamente su contexto de ejecución al worktree de trabajo (`.harness/worktrees/<id>`) y activa los perfiles asignados a la sesión.
+- `--tooling <ruta>`: Ruta personalizada al directorio de tooling (por defecto `~/.config/gz-ia/tooling`).
+- `-P, --profile <nombre>`: Perfil de tooling específico a activar dinámicamente.
+- `--toolkit <id>`: Toolkits específicos a incorporar adicionalmente en el microkernel.
+- `--allow-get`: Expone la herramienta `worktree_get` al agente (deshabilitada por defecto para mantener la integración como una acción exclusivamente humana).
+
+#### Configuración automática proyectada para agentes:
+Cuando se inicia una sesión con perfiles y toolkits activos, `gz-ia` genera `.mcp.json` y `.agents/mcp_config.json` apuntando a:
+
+```json
+{
+  "mcpServers": {
+    "gz-ia": {
+      "command": "gz-ia",
+      "args": ["mcp", "--session", "<session-id>"]
+    }
+  }
+}
+```
+
+Al recibir solicitudes `tools/call`, `gz-ia mcp` despacha la llamada a través del microkernel Orchy con resiliencia por Circuit Breaker (`HEALTHY`, `DEGRADED`, `DEAD`), garantizando que cualquier fallo en una herramienta sea reportado honestamente sin interrumpir al agente.
 

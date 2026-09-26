@@ -17,9 +17,20 @@ Es fundamental delimitar con claridad técnica el alcance y los límites del ais
 Para prevenir errores y modificaciones accidentales en Git, `gz-ia` configura guardrails activos por worktree:
 - **Bloqueo de `git push` (`pre-push` hook):** Impide que comandos automáticos envíen cambios al remoto desde el worktree de la sesión.
 - **Protección estricta de ramas (`reference-transaction` hook):** El agente solo tiene permitido operar dentro de su propia rama (`refs/heads/harness/<sessionID>` y `HEAD`). No puede modificar `main`, `master`, ni la rama de otra sesión simultánea (`refs/heads/harness/<otra-sesión>`).
-- **Reenvío de hooks de proyecto (Husky, lint-staged, commitlint):** Si el repositorio base cuenta con hooks de `commit-msg` o `pre-commit`, los hooks del worktree los invocan de forma transparente para asegurar que las convenciones de commit del proyecto se respeten.
-- **Aislamiento de artefactos efímeros (`core.excludesFile`):** Cada worktree ignora localmente `.agents/`, `.mcp.json` y `*-AGENTS.md`. Al ejecutar `session get`, estos artefactos efímeros y el prompt sintético se purgan de forma atómica antes del commit para evitar filtrar secretos o directivas al repositorio base.
-- **Configuración aislada (`extensions.worktreeConfig`):** La directiva `core.hooksPath` y `core.excludesFile` se establecen exclusivamente a nivel de worktree (`config.worktree`).
+- **Reenvío seguro de hooks de proyecto (Husky, lint-staged, commitlint):** Si el repositorio base cuenta con hooks de `commit-msg` o `pre-commit`, los hooks del worktree los invocan de forma transparente para asegurar que las convenciones de commit del proyecto se respeten fielmente.
+- **Manifiesto de proyección agéntica y eliminación de `core.excludesFile`:** En versiones anteriores se recurría a `core.excludesFile`, lo cual resultaba frágil ante diferentes versiones de Git y podía enmascarar archivos del proyecto. `gz-ia` sustituyó este mecanismo por un **Manifiesto de Proyección** explícito (`.harness/sessions/<id>.manifest.json`). Este archivo registra con exactitud qué archivos fueron proyectados de forma efímera y cuáles pertenecían originalmente al repositorio base.
+- **Configuración aislada (`extensions.worktreeConfig`):** La directiva `core.hooksPath` se establece exclusivamente a nivel de worktree (`config.worktree`) sin afectar la configuración global del repositorio.
+
+### Manifiesto de Proyección y Fusión No Destructiva
+Al inicializar una sesión o proyectar perfiles (`-P`), `gz-ia` persiste en `.harness/sessions/<id>.manifest.json` un registro atómico con la siguiente estructura:
+- **`CreatedFiles` (`[]string`):** Rutas relativas creadas en el worktree que no existían previamente en el repositorio (ej. directivas sintéticas de sesión `*-AGENTS.md`, symlinks efímeros en `.agents/skills/`).
+- **`OriginalFiles` (`map[string]string`):** Mapa de ruta relativa a su contenido textual previo a la proyección. Aplica a archivos legítimos preexistentes en el repositorio que requirieron fusión en caliente (como un `AGENTS.md` del equipo o un `.mcp.json` compartido).
+- **`ProjectedHash` (`map[string]string`):** Suma SHA-256 de lo que proyectó `gz-ia` para cada ruta al montar la sesión.
+
+#### ¿Por qué `session get` y `session diff` son No Destructivos?
+1. **Preservación estricta de archivos legítimos del repositorio:** Archivos como `.agents/config.json` o `.mcp.json` que formaban parte del repositorio antes de la sesión **nunca son borrados**. Si el agente no alteró su contenido (su hash en el worktree coincide con `ProjectedHash`), son restaurados fielmente a su versión previa (`OriginalFiles`) antes del merge o cálculo de diff.
+2. **Preservación de ediciones intencionales del agente:** Si durante la sesión el agente edita intencionalmente un archivo proyectado (por ejemplo, actualiza o añade una convención de equipo a `AGENTS.md`), el hash actual diferirá de `ProjectedHash`. El harness detecta la mutación intencional y **preserva los cambios del agente**, incorporándolos limpiamente a la rama base en `session get`.
+3. **Purga limpia de artefactos puramente efímeros:** Si un archivo perteneciente a `CreatedFiles` mantiene su hash original proyectado (`ProjectedHash`), el arnés lo remueve antes de integrar los cambios, evitando ensuciar el árbol ni dejar rastros en el historial de Git.
 
 ### Alcance y Límites de los Guardrails: Prevención de Accidentes vs Sandbox
 > [!IMPORTANT] Prevención contra errores accidentales, no contención adversaria
@@ -46,18 +57,18 @@ A diferencia de un `git clone`:
 flowchart TD
     Init["Inicio de Sesión (gz-ia chat)"] --> CheckGit{"¿Es un repo Git válido?"}
     
-    CheckGit -->|"Sí"| CreateWT["Crear Worktree:<br/>git worktree add -b harness/{id} .harness/worktrees/{id} HEAD"]
-    CheckGit -->|"No"| Fallback["Modo Fallback Directo<br/>(Opera en el directorio actual)"]
+    CheckGit -->|"Sí"| CreateWT["Crear Worktree: git worktree add -b harness/{id}"]
+    CheckGit -->|"No"| Fallback["Modo Fallback Directo (Directorio actual)"]
     
     CreateWT --> AgentRun["Agente opera dentro de .harness/worktrees/{id}"]
     Fallback --> AgentRun
     
-    AgentRun --> Audit["Inspección Humana:<br/>gz-ia session read {id}<br/>gz-ia session diff {id}"]
+    AgentRun --> Audit["Inspección Humana: gz-ia session read / diff"]
     
     Audit --> Decision{"¿Integrar cambios?"}
     
-    Decision -->|"Integrar"| Get["Integración Humana:<br/>gz-ia session get {id}"]
-    Decision -->|"Descartar"| Delete["Limpieza de Sesión:<br/>gz-ia session delete {id}"]
+    Decision -->|"Integrar"| Get["Integración Humana: gz-ia session get {id}"]
+    Decision -->|"Descartar"| Delete["Limpieza de Sesión: gz-ia session delete {id}"]
     
     Get --> Delete
 ```
@@ -72,8 +83,10 @@ Cuando se lanza una sesión con el ID `a8f1b2c3`, la estructura dentro del repos
 mi-proyecto/
 ├── .git/
 ├── .harness/
+│   ├── vault.json                     # Secretos seguros del proyecto (0600)
 │   ├── sessions/
 │   │   ├── a8f1b2c3.json              # Registro de la sesión
+│   │   ├── a8f1b2c3.manifest.json     # Manifiesto de proyección agéntica
 │   │   └── a8f1b2c3.events.jsonl       # Observabilidad y eventos
 │   └── worktrees/
 │       └── a8f1b2c3/                  # Working tree de la sesión
@@ -126,9 +139,11 @@ gz-ia session get a8f1b2c3 --no-commit
 
 #### Semántica Técnica de `session get`:
 1. **Validación de precondición en repositorio base:** Antes de iniciar la integración, `gz-ia` verifica que tu repositorio base no tenga modificaciones sin comitear. Si está sucio, frena la operación y te solicita realizar `commit` o `stash` para prevenir cualquier sobreescritura accidental.
-2. **Commit de seguridad previo en worktree:** Si en el worktree de la sesión existen modificaciones sin comitear o archivos untracked generados por el agente, `gz-ia` genera un commit de seguridad automático en la rama `harness/<id>` para no perder trabajo.
-3. **Merge en la rama base activa:** Ejecuta un `git merge` (o `git merge --squash` si se pasa `--squash`, y sin commit si se pasa `--no-commit`) de la rama `harness/<id>` en la rama activa del repositorio.
-4. **Manejo de conflictos:** Si la rama base avanzó y existen conflictos, Git detiene la operación sin sobreescribir tus archivos; informa los archivos en conflicto y mantiene el worktree de la sesión intacto para resolución manual (`gz-ia session path <id>`) o para abortar (`git merge --abort` o `git reset --merge`).
+2. **Reconciliación y limpieza según el Manifiesto de Sesión:** Inspecciona `.harness/sessions/<id>.manifest.json`. Los archivos proyectados no modificados se retiran y los archivos legítimos preexistentes (`OriginalFiles`) se restauran a su estado original si no fueron tocados, preservando a su vez las ediciones intencionales realizadas por el agente.
+3. **Commit de seguridad previo en worktree (Conventional Commits):** Si en el worktree de la sesión existen modificaciones sin comitear o archivos untracked generados por el agente, `gz-ia` genera un commit de seguridad automático en la rama `harness/<id>` con el formato estándar `chore(harness): session <id> changes`.
+4. **Merge en la rama base activa:** Ejecuta un `git merge` (o `git merge --squash` si se pasa `--squash`, y sin commit si se pasa `--no-commit`) de la rama `harness/<id>` en la rama activa del repositorio. El commit resultante se nombra `chore(harness): merge session <id> changes` (o `chore(harness): merge session <id> changes (squash)`).
+5. **Reenvío de hooks:** Si el repositorio define hooks de validación (`pre-commit`, `commit-msg`), estos se ejecutan asegurando el cumplimiento estricto de las políticas de código del equipo.
+6. **Manejo de conflictos:** Si la rama base avanzó y existen conflictos, Git detiene la operación sin sobreescribir tus archivos; informa los archivos en conflicto y mantiene el worktree de la sesión intacto para resolución manual (`gz-ia session path <id>`) o para abortar (`git merge --abort` o `git reset --merge`).
 
 ---
 

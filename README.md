@@ -202,7 +202,10 @@ gountz-ia/
 │   │   └── tui/                # Cliente interactivo Bubble Tea / Lipgloss / Huh
 │   ├── features/
 │   │   ├── session/            # Orquestador de sesiones y drivers multi-agente
-│   │   ├── workspace/          # Gestor de Git Worktrees, diffs, merges y detección de root
+│   │   ├── workspace/          # Gestor de Git Worktrees, guardrails, diffs y manifiestos
+│   │   ├── profile/            # Definición y composición de perfiles agénticos
+│   │   ├── tooling/            # Tooling modular, toolkits componibles y proyección en worktree
+│   │   ├── vault/              # Almacén seguro de secretos y variables de entorno del proyecto
 │   │   ├── logger/             # Event bus y logger append-only (.events.jsonl)
 │   │   ├── metrics/            # Agregador de telemetría y analizador de transcripts
 │   │   └── updater/            # Actualizador atómico contra GitHub Releases

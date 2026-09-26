@@ -16,10 +16,10 @@ flowchart TD
     AgyTranscript["transcript.jsonl (Antigravity Brain)"] --> Aggregator["Metrics Aggregator"]
     EventsFile[".events.jsonl y SessionRecord"] --> Aggregator
     
-    Aggregator --> D1["1. Duración y Tiempo<br/>(Wall-clock time, Tiempo activo)"]
-    Aggregator --> D2["2. Pasos y Etapas<br/>(Etapas READ / PENDING / FINISH)"]
-    Aggregator --> D3["3. Desglose de Tokens (agy)<br/>(Input, Output, Cache Read, Cache Creation)"]
-    Aggregator --> D4["4. Uso de Herramientas<br/>(Frecuencia, fallos, llamadas a tools)"]
+    Aggregator --> D1["1. Duración y Tiempo (Wall-clock time)"]
+    Aggregator --> D2["2. Pasos y Etapas (READ / PENDING / FINISH)"]
+    Aggregator --> D3["3. Desglose de Tokens agy (Input, Output, Cache)"]
+    Aggregator --> D4["4. Uso de Herramientas (Frecuencia, fallos, llamadas)"]
 ```
 
 ---

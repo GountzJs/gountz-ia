@@ -283,20 +283,22 @@ Gestiona secretos y variables de entorno centralizadas para perfiles y agentes c
 #### Subcomandos:
 
 ```bash
-# Listar variables configuradas y recomendadas (con valores ofuscados)
+# Listar variables configuradas y recomendadas con valores ofuscados
 gz-ia vault list [-d, --dir <directorio>]
 
-# Guardar o actualizar una variable (solicita el secreto con entrada protegida)
-gz-ia vault set <VARIABLE> [VALOR] [-v, --value <val>]
+# Guardar o actualizar una variable (si omites el valor, se solicita de forma interactiva y enmascarada)
+gz-ia vault set <VARIABLE> [VALOR] [-v, --value <val>] [-d, --dir <directorio>]
 
-# Inspeccionar el estado y origen de una variable (ofuscada por defecto)
-gz-ia vault get <VARIABLE> [--reveal]
+# Inspeccionar el estado y origen de una variable (ofuscada por defecto o visible con --reveal)
+gz-ia vault get <VARIABLE> [--reveal] [-d, --dir <directorio>]
 
-# Eliminar una variable del vault
-gz-ia vault delete <VARIABLE>
+# Eliminar una variable del vault (aliases: rm, remove)
+gz-ia vault delete <VARIABLE> [-d, --dir <directorio>]
+gz-ia vault rm <VARIABLE>
+gz-ia vault remove <VARIABLE>
 
-# Imprimir la ruta física del archivo vault.json
-gz-ia vault path
+# Imprimir la ruta física absoluta del archivo vault.json
+gz-ia vault path [-d, --dir <directorio>]
 ```
 
 ---

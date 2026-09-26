@@ -9,11 +9,11 @@ La arquitectura de `gz-ia` está diseñada bajo los principios de **Inversión d
 ```mermaid
 flowchart TD
     subgraph Core ["Servicios de Dominio (internal/features)"]
-        SS["SessionService<br/>(Ciclo de Vida de Sesión)"]
-        WS["WorkspaceProvider<br/>(Git Worktrees y Aislamiento)"]
-        LS["LoggerService<br/>(Registro de Eventos .events.jsonl)"]
-        MS["MetricsService<br/>(Telemetría y Desglose Tokens)"]
-        US["UpdaterService<br/>(Actualización Atómica)"]
+        SS["SessionService (Ciclo de Vida de Sesión)"]
+        WS["WorkspaceProvider (Git Worktrees y Aislamiento)"]
+        LS["LoggerService (Registro de Eventos .events.jsonl)"]
+        MS["MetricsService (Telemetría y Desglose Tokens)"]
+        US["UpdaterService (Actualización Atómica)"]
     end
 
     subgraph Adapters ["Adaptadores y Componentes"]

@@ -15,43 +15,64 @@ El Vault se gestiona mediante el archivo `.harness/vault.json`:
 
 ## 2. Comandos CLI: `gz-ia vault`
 
+El comando `gz-ia vault` (o `gz-ia vault list` por defecto) administra el ciclo de vida de los secretos:
+
 ### Listar Variables y Estado de Configuración
 ```bash
-gz-ia vault list
+gz-ia vault list [-d <directorio>]
 ```
 **Salida de ejemplo:**
 ```text
-VARIABLE             ESTADO               ORIGEN              VALOR               
-ANTHROPIC_API_KEY    CONFIGURADA          entorno             sk-a****************
-OPENAI_API_KEY       CONFIGURADA          vault               sk-p****************
-NODE_ENV             NO CONFIGURADA       -                   -                   
+🔒 Vault de Secretos y Variables de Entorno — Gountz IA
+  Archivo: /home/usuario/proyecto/.harness/vault.json (Permisos 0600, ignorado por Git)
+
+VARIABLE                  ESTADO        VALOR ENMASCARADO         RECOMENDADA PARA    
+─────────────────────────────────────────────────────────────────────────────────────────────
+ANTHROPIC_API_KEY         Vault [✓]     sk-ant-a************34    claude
+OPENAI_API_KEY            Sistema [$]   sk-proj-************99    opencode
+DATABASE_URL              Faltante      (no configurada)          data
 ```
-- Muestra si la variable proviene del entorno (`os.Environ`) o del archivo del vault.
-- Por defecto, los valores sensibles son enmascarados mostrando únicamente los primeros 4 y últimos 4 caracteres.
+- **Estados identificados:**
+  - `Vault [✓]`: Almacenada y protegida en `.harness/vault.json`.
+  - `Sistema [$]`: Detectada en las variables de entorno del sistema operativo (`$ENV`).
+  - `Faltante`: Variable recomendada por un agente o perfil activo pero no encontrada.
+- **Valores protegidos:** Todos los secretos se muestran ofuscados (`MaskSecret`), revelando solo el prefijo y sufijo mínimo necesario.
 
 ### Guardar o Actualizar una Variable
 ```bash
-gz-ia vault set ANTHROPIC_API_KEY "sk-ant-api03-xxxx..."
-```
+# Modo interactivo seguro (recomendado: entrada enmascarada sin rastro en el historial de shell)
+gz-ia vault set ANTHROPIC_API_KEY
 
-### Consultar el Valor de una Variable
+# Modo directo pasando el valor como argumento o mediante el flag -v
+gz-ia vault set ANTHROPIC_API_KEY "sk-ant-api03-xxxx..."
+# o
+gz-ia vault set ANTHROPIC_API_KEY -v "sk-ant-api03-xxxx..."
+```
+> [!TIP] Prevención de fuga en `.bash_history`
+> Si omites el valor al ejecutar `gz-ia vault set <CLAVE>`, el comando abre un formulario interactivo Huh con `EchoModePassword`. El texto introducido no se imprime en pantalla ni queda registrado en el historial de tu shell.
+
+### Consultar el Estado y Origen de una Variable
 ```bash
-# Consulta segura (enmascarada)
+# Inspección segura con valor enmascarado
 gz-ia vault get ANTHROPIC_API_KEY
 
-# Revelar el valor en texto claro (útil para scripts de shell)
+# Revelar el valor completo en texto plano (útil para tuberías y scripts)
 gz-ia vault get ANTHROPIC_API_KEY --reveal
 ```
 
 ### Eliminar una Variable
 ```bash
 gz-ia vault delete ANTHROPIC_API_KEY
+# Aliases disponibles:
+gz-ia vault rm ANTHROPIC_API_KEY
+gz-ia vault remove ANTHROPIC_API_KEY
 ```
 
 ### Obtener la Ruta Física del Almacén
 ```bash
 gz-ia vault path
 ```
+Imprime la ruta absoluta a `.harness/vault.json`, permitiendo su referencia en scripts o diagnósticos.
 
 ---
 

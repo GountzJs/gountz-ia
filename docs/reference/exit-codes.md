@@ -22,11 +22,13 @@ La CLI de `gz-ia` sigue rigurosamente las convenciones de códigos de salida del
 
 El runner interactivo del arnés (`OSRunner` (`internal/features/session/session.go`)) conecta de forma bidireccional los descriptores estándar del sistema operativo (`os.Stdin`, `os.Stdout`, `os.Stderr`).
 
+En sistemas POSIX, `configureSysProcAttr` analiza si `os.Stdin` es una TTY interactiva. Si es así, asigna un grupo de procesos propio (`Setpgid: true`) y sitúa el grupo en el Foreground de la terminal (`Ctty: fd`). Esto evita señales `SIGTTIN` al leer del teclado y garantiza que señales de interrupción (`Ctrl+C`) se entreguen directamente al proceso en ejecución:
+
 ```mermaid
 flowchart TD
     Shell["Shell del Usuario / Terminal TTY"] -->|"Ejecuta gz-ia chat"| CLI["CLI gz-ia (PID X)"]
     CLI -->|"Conecta Stdin/Stdout/Stderr"| Runner["OSRunner"]
-    Runner -->|"Inicia proceso hijo"| Agent["Agente (agy / claude / opencode) (PID Y)"]
+    Runner -->|"Inicia proceso hijo en Foreground"| Agent["Agente (agy / claude / opencode) (PID Y)"]
     
     Shell -.->|"Ctrl+C (SIGINT)"| Agent
     Agent -->|"Retorna código 130"| Runner
@@ -35,15 +37,16 @@ flowchart TD
     CLI -->|"Exit 130"| Shell
 ```
 
-### Proceso de Terminación Controlada (`session kill`)
+### Proceso de Terminación Controlada por Grupo de Procesos (`session kill`)
 
 Cuando un operador ejecuta `gz-ia session kill <id>`, la terminación se efectúa mediante `OSProcessKiller` (`internal/features/session/killer.go`):
 
-1. **Sondeo de Liveness:** Envía señal `0` (`syscall.Signal(0)`) para comprobar si el proceso con el PID registrado sigue vivo.
-2. **Señal SIGTERM Ordenada:** Envía `syscall.SIGTERM` permitiendo que el proceso flush buffers y cierre descriptores.
-3. **Periodo de Gracia:** Espera `100ms`.
-4. **Forzado con SIGKILL:** Si el proceso continúa activo tras el periodo de gracia, despacha `SIGKILL` forzado (`proc.Kill()`).
-5. **Persistencia de Estado:** Actualiza el archivo `.harness/sessions/<id>.json` marcando el estado de la sesión como `killed`.
+1. **Resolución de Grupo de Procesos (PGID):** Identifica el PGID (`syscall.Getpgid(pid)`) para operar sobre el grupo completo (`target = -pgid`), asegurando alcanzar tanto al agente como a cualquier subproceso o servidor MCP hijo.
+2. **Sondeo de Liveness:** Envía señal `0` (`syscall.Kill(target, 0)`) para comprobar si el grupo de procesos continúa activo.
+3. **Señal SIGTERM Ordenada:** Envía `SIGTERM` al grupo entero permitiendo que los agentes y servidores MCP cierren descriptores y guarden su estado limpiamente.
+4. **Periodo de Gracia Progresivo:** Monitorea el grupo en intervalos de 100ms durante una ventana de hasta **1.5 segundos (1500ms)**. Si el grupo finaliza en este intervalo, la terminación concluye de manera limpia.
+5. **Forzado Escalonado con SIGKILL:** Si tras la expiración de la ventana de gracia continúa activo algún proceso, se despacha `SIGKILL` al grupo (`-pgid`) y al PID principal. En Windows, se utiliza `taskkill /T /F /PID` para podar el árbol completo de procesos.
+6. **Persistencia de Estado:** Actualiza el archivo `.harness/sessions/<id>.json` marcando el estado de la sesión como `killed`.
 
 ---
 

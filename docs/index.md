@@ -57,6 +57,12 @@ En lugar de lanzar agentes directamente en tu directorio de trabajo o memorizar 
 2. **Espacio de trabajo desacoplado:** Ejecución de múltiples sesiones agénticas en paralelo sin colisionar en los archivos abiertos del editor ni ensuciar tu `git status`.
 3. **Observabilidad y registro unificado local:** Trazabilidad de etapas y auditoría en `.harness/` sin dependencias de servicios externos.
 
+::: tip Instalación universal en un solo comando
+```bash
+curl -fsSL https://raw.githubusercontent.com/GountzJs/gountz-ia/main/install.sh | bash
+```
+:::
+
 ::: tip Prueba rápida en un solo comando
 ```bash
 # Lanzar un chat interactivo con el agente disponible
