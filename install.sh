@@ -20,7 +20,7 @@ printf "${BLUE}${BOLD}› Gountz IA (gz-ia) — Instalador Universal${NC}\n"
 OS="$(uname -s)"
 case "${OS}" in
     Linux*)     PLATFORM="linux" ;;
-    *)          printf "${RED}Error: El instalador por script soporta Linux (nativo y WSL2). Para Windows nativo descarga el archivo .zip desde GitHub Releases: https://github.com/${REPO}/releases${NC}\n" >&2; exit 1 ;;
+    *)          printf "${RED}Error: El instalador por script soporta Linux (amd64). Para Windows descarga el archivo .zip desde GitHub Releases: https://github.com/${REPO}/releases${NC}\n" >&2; exit 1 ;;
 esac
 
 # 2. Detectar Arquitectura

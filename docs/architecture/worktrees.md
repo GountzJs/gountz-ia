@@ -129,7 +129,7 @@ gz-ia session get a8f1b2c3 --no-commit
 
 ---
 
-## Consideraciones Prácticas: Watchers, Linters, Dependencias y WSL2
+## Consideraciones Prácticas: Watchers, Linters, Dependencias y Plataformas
 
 ### 1. Exclusión de `.harness/` en herramientas de análisis
 Dado que cada worktree contiene una copia de los archivos del proyecto, es recomendable tener en cuenta la interacción con herramientas de análisis estático y watchers:
@@ -150,10 +150,10 @@ En proyectos Node/Frontend, un worktree nuevo no hereda `node_modules` automáti
 - **Recomendación con pnpm:** Se recomienda usar gestores basados en enlaces globales como **pnpm**, que comparten paquetes a través de hard links globales sin duplicar gigabytes en disco.
 - **Symlinks manuales:** Para tareas rápidas, se puede crear un symlink al `node_modules` raíz dentro del worktree de la sesión si la estructura de dependencias es compatible.
 
-### 3. Soporte de Plataformas (Linux & Windows WSL2)
-`gz-ia` está diseñado para entornos POSIX estándar:
-- **Linux nativo:** Soporte completo en distribuciones modernas (Ubuntu, Debian, Fedora, Arch).
-- **Windows bajo WSL2:** En sistemas Windows corporativos, se recomienda ejecutar `gz-ia` dentro de **WSL2** (Windows Subsystem for Linux 2). Esto garantiza el rendimiento nativo del sistema de archivos de Git y compatibilidad con señales POSIX.
+### 3. Soporte de Plataformas (Linux & Windows)
+`gz-ia` compila de forma nativa para:
+- **Linux:** Soporte completo en distribuciones modernas (Ubuntu, Debian, Fedora, Arch, etc.).
+- **Windows:** Soporte nativo para sistemas Windows de 64 bits (amd64).
 
 ### 4. Comportamiento en Submódulos de Git
 `ResolveProjectRoot` utiliza `git rev-parse --show-toplevel`. Si ejecutas `gz-ia` desde el interior de un submódulo, la raíz se resuelve intencionalmente a la del **submódulo activo**, ya que cada submódulo constituye un repositorio Git independiente con sus propias ramas, commits y remotos. Si deseas que la sesión opere sobre el repositorio principal contenedor, debes ejecutar el comando desde la raíz del superproyecto.

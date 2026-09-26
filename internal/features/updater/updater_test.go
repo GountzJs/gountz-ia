@@ -63,18 +63,23 @@ func TestCompareVersions(t *testing.T) {
 }
 
 func TestCheckLatest(t *testing.T) {
-	forgejoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `[
-			{"name": "tag/1.2.0", "id": "commit1"},
-			{"name": "tag/1.1.0", "id": "commit2"}
-		]`)
+		fmt.Fprintln(w, `{
+			"tag_name": "v1.2.0",
+			"name": "Release v1.2.0",
+			"assets": [
+				{
+					"name": "gz-ia_1.2.0_linux_amd64.tar.gz",
+					"browser_download_url": "https://github.test/releases/download/v1.2.0/gz-ia_1.2.0_linux_amd64.tar.gz"
+				}
+			]
+		}`)
 	}))
-	defer forgejoServer.Close()
+	defer ghServer.Close()
 
 	svc := NewService(Config{
-		ForgejoAPIURL:  forgejoServer.URL,
-		NexusBaseURL:   "https://nexus.test/repo",
+		GitHubAPIURL:   ghServer.URL,
 		CurrentVersion: "1.1.0",
 	})
 
@@ -89,24 +94,24 @@ func TestCheckLatest(t *testing.T) {
 	if !info.IsNewer {
 		t.Errorf("esperado isNewer=true, obtenido false")
 	}
-	expectedPkg := fmt.Sprintf("gz-ia_1.2.0_linux_%s", runtime.GOARCH)
+	expectedPkg := fmt.Sprintf("gz-ia_1.2.0_%s_%s", runtime.GOOS, runtime.GOARCH)
 	if info.PackageName != expectedPkg {
 		t.Errorf("packageName esperado %s, obtenido %s", expectedPkg, info.PackageName)
 	}
 }
 
 func TestCheckLatest_AlreadyUpToDate(t *testing.T) {
-	forgejoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `[
-			{"name": "v1.0.0", "id": "commit1"}
-		]`)
+		fmt.Fprintln(w, `{
+			"tag_name": "v1.0.0",
+			"name": "Release v1.0.0"
+		}`)
 	}))
-	defer forgejoServer.Close()
+	defer ghServer.Close()
 
 	svc := New(Config{
-		ForgejoAPIURL:  forgejoServer.URL,
-		NexusBaseURL:   "https://nexus.test/repo",
+		GitHubAPIURL:   ghServer.URL,
 		CurrentVersion: "v1.0.0",
 	})
 
@@ -121,32 +126,33 @@ func TestCheckLatest_AlreadyUpToDate(t *testing.T) {
 }
 
 func TestCheckLatest_Errors(t *testing.T) {
-	// 1. Error de estado HTTP
+	// 1. Error HTTP 500
 	errServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer errServer.Close()
 
-	svcErr := NewService(Config{ForgejoAPIURL: errServer.URL})
+	svcErr := NewService(Config{GitHubAPIURL: errServer.URL})
 	if _, err := svcErr.CheckLatest(context.Background()); err == nil {
 		t.Error("se esperaba error con HTTP 500 y se obtuvo nil")
 	}
 
-	// 2. Respuesta JSON vacía
+	// 2. Respuesta sin tag_name
 	emptyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `[]`)
+		fmt.Fprintln(w, `{}`)
 	}))
 	defer emptyServer.Close()
 
-	svcEmpty := NewService(Config{ForgejoAPIURL: emptyServer.URL})
+	svcEmpty := NewService(Config{GitHubAPIURL: emptyServer.URL})
 	if _, err := svcEmpty.CheckLatest(context.Background()); err == nil {
-		t.Error("se esperaba error con lista vacía de tags")
+		t.Error("se esperaba error con tag_name vacío")
 	}
 }
 
 func TestUpdate_Success(t *testing.T) {
 	targetVer := "1.2.0"
+	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
 	// Creamos un .tar.gz sintético en memoria conteniendo el binario gz-ia y otro archivo ignorado
@@ -161,7 +167,7 @@ func TestUpdate_Success(t *testing.T) {
 
 	for name, content := range files {
 		hdr := &tar.Header{
-			Name: fmt.Sprintf("gz-ia_%s_linux_%s/%s", targetVer, goarch, name),
+			Name: fmt.Sprintf("gz-ia_%s_%s_%s/%s", targetVer, goos, goarch, name),
 			Mode: 0755,
 			Size: int64(len(content)),
 		}
@@ -175,8 +181,8 @@ func TestUpdate_Success(t *testing.T) {
 	tw.Close()
 	gw.Close()
 
-	nexusServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expectedPath := fmt.Sprintf("/%s/gz-ia_%s_linux_%s.tar.gz", targetVer, targetVer, goarch)
+	downloadServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		expectedPath := fmt.Sprintf("/v%s/gz-ia_%s_%s_%s.tar.gz", targetVer, targetVer, goos, goarch)
 		if r.URL.Path != expectedPath {
 			http.NotFound(w, r)
 			return
@@ -184,12 +190,12 @@ func TestUpdate_Success(t *testing.T) {
 		w.Header().Set("Content-Type", "application/x-gzip")
 		w.Write(buf.Bytes())
 	}))
-	defer nexusServer.Close()
+	defer downloadServer.Close()
 
 	tempInstallDir := t.TempDir()
 
 	svc := NewService(Config{
-		NexusBaseURL: nexusServer.URL,
+		DownloadBaseURL: downloadServer.URL,
 	})
 
 	res, err := svc.Update(context.Background(), targetVer, tempInstallDir)
@@ -222,6 +228,7 @@ func TestUpdate_Success(t *testing.T) {
 
 func TestUpdate_AutoResolvesLatestVersion(t *testing.T) {
 	targetVer := "1.3.0"
+	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
 	var buf bytes.Buffer
@@ -229,7 +236,7 @@ func TestUpdate_AutoResolvesLatestVersion(t *testing.T) {
 	tw := tar.NewWriter(gw)
 
 	hdr := &tar.Header{
-		Name: fmt.Sprintf("gz-ia_%s_linux_%s/gz-ia", targetVer, goarch),
+		Name: fmt.Sprintf("gz-ia_%s_%s_%s/gz-ia", targetVer, goos, goarch),
 		Mode: 0755,
 		Size: int64(len("binary-content")),
 	}
@@ -238,23 +245,33 @@ func TestUpdate_AutoResolvesLatestVersion(t *testing.T) {
 	tw.Close()
 	gw.Close()
 
-	forgejoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `[{"name": "v1.3.0", "id": "c1"}]`)
-	}))
-	defer forgejoServer.Close()
-
-	nexusServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var downloadServer *httptest.Server
+	downloadServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-gzip")
 		w.Write(buf.Bytes())
 	}))
-	defer nexusServer.Close()
+	defer downloadServer.Close()
+
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{
+			"tag_name": "v1.3.0",
+			"name": "Release v1.3.0",
+			"assets": [
+				{
+					"name": "gz-ia_1.3.0_%s_%s.tar.gz",
+					"browser_download_url": "%s/v1.3.0/gz-ia_1.3.0_%s_%s.tar.gz"
+				}
+			]
+		}`, goos, goarch, downloadServer.URL, goos, goarch)
+	}))
+	defer ghServer.Close()
 
 	tempInstallDir := t.TempDir()
 
 	svc := NewService(Config{
-		ForgejoAPIURL: forgejoServer.URL,
-		NexusBaseURL:  nexusServer.URL,
+		GitHubAPIURL:    ghServer.URL,
+		DownloadBaseURL: downloadServer.URL,
 	})
 
 	// targetVer vacío: debe consultar CheckLatest y usar v1.3.0
@@ -271,15 +288,15 @@ func TestUpdate_AutoResolvesLatestVersion(t *testing.T) {
 func TestUpdate_Errors(t *testing.T) {
 	tempInstallDir := t.TempDir()
 
-	// 1. Error HTTP de Nexus (404 Not Found)
-	nexus404 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// 1. Error HTTP 404
+	server404 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}))
-	defer nexus404.Close()
+	defer server404.Close()
 
-	svc := NewService(Config{NexusBaseURL: nexus404.URL})
+	svc := NewService(Config{DownloadBaseURL: server404.URL})
 	if _, err := svc.Update(context.Background(), "9.9.9", tempInstallDir); err == nil {
-		t.Error("se esperaba error por 404 de Nexus y se obtuvo nil")
+		t.Error("se esperaba error por 404 y se obtuvo nil")
 	}
 
 	// 2. Tar sin binario gz-ia
@@ -296,130 +313,41 @@ func TestUpdate_Errors(t *testing.T) {
 	tw.Close()
 	gw.Close()
 
-	nexusNoBinary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	noBinaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-gzip")
 		w.Write(buf.Bytes())
 	}))
-	defer nexusNoBinary.Close()
+	defer noBinaryServer.Close()
 
-	svcNoBin := NewService(Config{NexusBaseURL: nexusNoBinary.URL})
+	svcNoBin := NewService(Config{DownloadBaseURL: noBinaryServer.URL})
 	if _, err := svcNoBin.Update(context.Background(), "1.0.0", tempInstallDir); err == nil {
-		t.Error("se esperaba error cuando el tar no contiene gz-ia")
+		t.Error("se esperaba error porque el tar no contiene gz-ia")
 	}
 }
 
-func TestCheckLatest_NexusAPI(t *testing.T) {
-	nexusSearchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{
-			"items": [
-				{"group": "/gz-ia/0.0.1", "name": "/gz-ia/0.0.1/gz-ia_0.0.1_linux_amd64.tar.gz"},
-				{"group": "/gz-ia/0.0.2", "name": "/gz-ia/0.0.2/gz-ia_0.0.2_linux_amd64.tar.gz"},
-				{"group": "/other-pkg/1.0.0", "name": "/other-pkg/1.0.0/other.tar.gz"}
-			]
-		}`)
-	}))
-	defer nexusSearchServer.Close()
-
-	svc := NewService(Config{
-		NexusSearchURL: nexusSearchServer.URL,
-		NexusBaseURL:   "https://nexus.test/repo",
-		CurrentVersion: "0.0.1",
-	})
-
-	info, err := svc.CheckLatest(context.Background())
-	if err != nil {
-		t.Fatalf("CheckLatest con Nexus API falló: %v", err)
-	}
-
-	if info.Version != "0.0.2" {
-		t.Errorf("versión esperada 0.0.2, obtenida %s", info.Version)
-	}
-	if !info.IsNewer {
-		t.Errorf("esperado isNewer=true, obtenido false")
-	}
-	expectedPkg := fmt.Sprintf("gz-ia_0.0.2_linux_%s", runtime.GOARCH)
-	if info.PackageName != expectedPkg {
-		t.Errorf("packageName esperado %s, obtenido %s", expectedPkg, info.PackageName)
-	}
-	expectedURL := fmt.Sprintf("https://nexus.test/repo/0.0.2/%s.tar.gz", expectedPkg)
-	if info.DownloadURL != expectedURL {
-		t.Errorf("downloadURL esperado %s, obtenido %s", expectedURL, info.DownloadURL)
-	}
-}
-
-func TestCheckLatest_NexusFallbackToForgejo(t *testing.T) {
-	nexusFailServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "server error", http.StatusInternalServerError)
-	}))
-	defer nexusFailServer.Close()
-
-	forgejoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `[{"name": "v0.0.3", "id": "commit1"}]`)
-	}))
-	defer forgejoServer.Close()
-
-	svc := NewService(Config{
-		NexusSearchURL: nexusFailServer.URL,
-		ForgejoAPIURL:  forgejoServer.URL,
-		NexusBaseURL:   "https://nexus.test/repo",
-		CurrentVersion: "0.0.1",
-	})
-
-	info, err := svc.CheckLatest(context.Background())
-	if err != nil {
-		t.Fatalf("CheckLatest con fallback a Forgejo falló: %v", err)
-	}
-	if info.Version != "0.0.3" {
-		t.Errorf("versión esperada 0.0.3 desde Forgejo, obtenida %s", info.Version)
-	}
-}
-
-func TestCheckLatest_BothFail(t *testing.T) {
-	nexusFailServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "not found", http.StatusNotFound)
-	}))
-	defer nexusFailServer.Close()
-
-	forgejoFailServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "not found", http.StatusNotFound)
-	}))
-	defer forgejoFailServer.Close()
-
-	svc := NewService(Config{
-		NexusSearchURL: nexusFailServer.URL,
-		ForgejoAPIURL:  forgejoFailServer.URL,
-	})
-
-	_, err := svc.CheckLatest(context.Background())
-	if err == nil {
-		t.Fatal("se esperaba error cuando ambas fuentes fallan")
-	}
-}
-
-func TestEnvVarsConfig(t *testing.T) {
-	oldF := os.Getenv("GZ_FORGEJO_API_URL")
-	oldN := os.Getenv("GZ_NEXUS_BASE_URL")
-	oldNS := os.Getenv("GZ_NEXUS_SEARCH_URL")
+func TestConfig_EnvOverrides(t *testing.T) {
+	oldURL := os.Getenv("GZ_GITHUB_API_URL")
+	oldRepo := os.Getenv("GZ_GITHUB_REPO")
+	oldDL := os.Getenv("GZ_DOWNLOAD_BASE_URL")
 	defer func() {
-		os.Setenv("GZ_FORGEJO_API_URL", oldF)
-		os.Setenv("GZ_NEXUS_BASE_URL", oldN)
-		os.Setenv("GZ_NEXUS_SEARCH_URL", oldNS)
+		os.Setenv("GZ_GITHUB_API_URL", oldURL)
+		os.Setenv("GZ_GITHUB_REPO", oldRepo)
+		os.Setenv("GZ_DOWNLOAD_BASE_URL", oldDL)
 	}()
 
-	os.Setenv("GZ_FORGEJO_API_URL", "https://custom-forgejo.org/tags")
-	os.Setenv("GZ_NEXUS_BASE_URL", "https://custom-nexus.org/releases/")
-	os.Setenv("GZ_NEXUS_SEARCH_URL", "https://custom-nexus.org/service/rest/v1/search")
+	os.Setenv("GZ_GITHUB_API_URL", "https://api.github.test/custom")
+	os.Setenv("GZ_GITHUB_REPO", "myorg/myrepo")
+	os.Setenv("GZ_DOWNLOAD_BASE_URL", "https://dl.github.test/releases/")
 
 	svc := NewService().(*updaterService)
-	if svc.cfg.ForgejoAPIURL != "https://custom-forgejo.org/tags" {
-		t.Errorf("ForgejoAPIURL esperada de env: %s, obtenida: %s", "https://custom-forgejo.org/tags", svc.cfg.ForgejoAPIURL)
+
+	if svc.cfg.GitHubAPIURL != "https://api.github.test/custom" {
+		t.Errorf("GitHubAPIURL esperada de env: %s, obtenida: %s", "https://api.github.test/custom", svc.cfg.GitHubAPIURL)
 	}
-	if svc.cfg.NexusBaseURL != "https://custom-nexus.org/releases" {
-		t.Errorf("NexusBaseURL esperada sin slash al final: %s, obtenida: %s", "https://custom-nexus.org/releases", svc.cfg.NexusBaseURL)
+	if svc.cfg.GitHubRepo != "myorg/myrepo" {
+		t.Errorf("GitHubRepo esperada de env: %s, obtenida: %s", "myorg/myrepo", svc.cfg.GitHubRepo)
 	}
-	if svc.cfg.NexusSearchURL != "https://custom-nexus.org/service/rest/v1/search" {
-		t.Errorf("NexusSearchURL esperada de env: %s, obtenida: %s", "https://custom-nexus.org/service/rest/v1/search", svc.cfg.NexusSearchURL)
+	if svc.cfg.DownloadBaseURL != "https://dl.github.test/releases" {
+		t.Errorf("DownloadBaseURL esperada sin slash al final: %s, obtenida: %s", "https://dl.github.test/releases", svc.cfg.DownloadBaseURL)
 	}
 }

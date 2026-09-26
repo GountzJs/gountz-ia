@@ -18,7 +18,7 @@ flowchart TB
         WORK["Workspace & Git Worktree Manager<br/><code>internal/features/workspace</code>"]
         LOG["Event Logger & Bus<br/><code>internal/features/logger</code>"]
         METR["Metrics & Telemetry Aggregator<br/><code>internal/features/metrics</code>"]
-        UPDT["Release & Nexus Updater<br/><code>internal/features/updater</code>"]
+        UPDT["Release & GitHub Updater<br/><code>internal/features/updater</code>"]
     end
 
     subgraph KernelLayer ["3. Microkernel Orchy (Motor MCP & Plugins)"]
@@ -76,7 +76,7 @@ El núcleo operativo de la CLI de `gz-ia`, completamente desacoplado de la termi
 - **`workspace` (`internal/features/workspace`):** Administra el ciclo de vida de los **Git Worktrees** efímeros, la creación de ramas `harness/<id>` y el fallback seguro en directorios planos si Git no está inicializado.
 - **`logger` (`internal/features/logger`):** Captura y persiste el log estructurado de etapas de razonamiento y acciones en formato JSONL (`.events.jsonl`).
 - **`metrics` (`internal/features/metrics`):** Agrega y analiza métricas de ejecución: duración total, pasos completados, consumo de tokens (input, output, caché) y llamadas a herramientas por cada agente y subagente.
-- **`updater` (`internal/features/updater`):** Comprueba actualizaciones contra Nexus REST API o Forgejo, gestiona descargas y reemplaza atómicamente el ejecutable.
+- **`updater` (`internal/features/updater`):** Comprueba actualizaciones y nuevas versiones publicadas en GitHub Releases, gestiona descargas y reemplaza atómicamente el ejecutable.
 
 ### 3. Microkernel Orchy (`packages/orchy/`)
 

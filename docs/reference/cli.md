@@ -30,7 +30,7 @@ Guía detallada de sintaxis, argumentos, banderas y códigos de retorno de todos
 | [`gz-ia session log`](#gz-ia-session-log) | `<id>`<br>`-a, --action`<br>`-s, --stage`<br>`--status`<br>`--agent`<br>`-r, --role`<br>`--duration`<br>`--error`<br>`-d, --dir` | N/A | Registra un evento estructurado en `.events.jsonl`. |
 | [`gz-ia session logs`](#gz-ia-session-logs) | `<id>`<br>`-f, --follow`<br>`--json`<br>`-d, --dir` | N/A | Consulta histórica o transmisión en vivo de los eventos de una sesión. |
 | [`gz-ia session prune`](#gz-ia-session-prune) | `-d, --dir` | N/A | Reconcilia y elimina sesiones, ramas de Git y worktrees huérfanos. |
-| [`gz-ia update`](#gz-ia-update) | `-c, --check`<br>`-f, --force`<br>`--version`<br>`--install-dir` | N/A | Verifica e instala la última versión de `gz-ia` desde Nexus/Forgejo. |
+| [`gz-ia update`](#gz-ia-update) | `-c, --check`<br>`-f, --force`<br>`--version`<br>`--install-dir` | N/A | Verifica e instala la última versión de `gz-ia` desde GitHub Releases. |
 | [`gz-ia version`](#gz-ia-version) | N/A | N/A | Muestra la versión, commit SHA y fecha de compilación. |
 
 ---
@@ -276,7 +276,7 @@ gz-ia session prune [-d, --dir <directorio>]
 
 ### `gz-ia update`
 
-Verifica e instala la última versión binaria disponible desde Nexus / Forgejo.
+Verifica e instala la última versión binaria disponible desde GitHub Releases.
 
 ```bash
 gz-ia update [flags]

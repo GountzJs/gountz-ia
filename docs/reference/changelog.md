@@ -34,5 +34,5 @@ Esta versión marca la primera entrega oficial de `gz-ia`, estableciendo las bas
 - **Observabilidad y Telemetría:**
   - Logger estructurado de etapas (`READ` $\rightarrow$ `PENDING` $\rightarrow$ `FINISH`) persistido en formato `.events.jsonl`.
   - Agregador de métricas con cálculo de duración, recuento de pasos y desglose de tokens y llamadas a herramientas.
-- **Actualizador Atómico Nexus:**
-  - Verificación continua e instalación atómica de releases binarias desde Sonatype Nexus con fallback a Forgejo.
+- **Actualizador Atómico de GitHub Releases:**
+  - Verificación continua e instalación atómica de releases binarias desde GitHub Releases.

@@ -483,18 +483,16 @@ type Service interface {
 
 La función `NormalizeVersion` elimina prefijos de tag comunes (`tag/` o `v`) para estandarizar cadenas SemVer (`v0.0.1` $\to$ `0.0.1`), permitiendo que `CompareVersions` compare segmentos mayores, menores y de parche (`[3]int`) de manera fiable.
 
-### Consulta Dual a Registros (Nexus REST + Forgejo API)
+### Consulta a GitHub Releases API
 
 ```mermaid
 flowchart TD
     Update["gz-ia update"] --> Check["CheckLatest(ctx)"]
-    Check --> Nexus["1. Consultar Nexus REST API (GZ_NEXUS_SEARCH_URL)"]
-    Nexus -->|Éxito| Found["Última versión detectada"]
-    Nexus -->|Fallo de Red / Inaccesible| Forgejo["2. Fallback a Forgejo Tags API (GZ_FORGEJO_API_URL)"]
-    Forgejo -->|Éxito| Found
-    Forgejo -->|Fallo| Err["Retorna error descriptivo"]
+    Check --> GH["Consultar GitHub Releases API (GZ_GITHUB_API_URL)"]
+    GH -->|Éxito| Found["Última versión detectada"]
+    GH -->|Fallo| Err["Retorna error descriptivo"]
     
-    Found --> Download["Descargar tarball .tar.gz en memoria"]
+    Found --> Download["Descargar asset .tar.gz desde GitHub Releases"]
     Download --> Stream["Descomprimir stream gzip + tar"]
     Stream --> Replace["Reemplazo atómico en installDir"]
 ```

@@ -32,35 +32,31 @@ type updaterService struct {
 // NewService crea una nueva instancia de Service con la configuración provista o por defecto.
 func NewService(customCfg ...Config) Service {
 	cfg := Config{
-		ForgejoAPIURL:  DefaultForgejoAPIURL,
-		NexusBaseURL:   DefaultNexusBaseURL,
-		NexusSearchURL: DefaultNexusSearchURL,
-		CurrentVersion: version.Version,
+		GitHubRepo:      DefaultGitHubRepo,
+		GitHubAPIURL:    DefaultGitHubAPIURL,
+		DownloadBaseURL: DefaultDownloadBaseURL,
+		CurrentVersion:  version.Version,
 	}
 
-	if envForgejo := os.Getenv("GZ_FORGEJO_API_URL"); envForgejo != "" {
-		cfg.ForgejoAPIURL = envForgejo
+	if envURL := os.Getenv("GZ_GITHUB_API_URL"); envURL != "" {
+		cfg.GitHubAPIURL = envURL
 	}
-	if envNexus := os.Getenv("GZ_NEXUS_BASE_URL"); envNexus != "" {
-		cfg.NexusBaseURL = strings.TrimRight(envNexus, "/")
+	if envRepo := os.Getenv("GZ_GITHUB_REPO"); envRepo != "" {
+		cfg.GitHubRepo = envRepo
 	}
-	if envNexusSearch := os.Getenv("GZ_NEXUS_SEARCH_URL"); envNexusSearch != "" {
-		cfg.NexusSearchURL = envNexusSearch
+	if envDownload := os.Getenv("GZ_DOWNLOAD_BASE_URL"); envDownload != "" {
+		cfg.DownloadBaseURL = strings.TrimRight(envDownload, "/")
 	}
 
 	if len(customCfg) > 0 {
-		if customCfg[0].ForgejoAPIURL != "" {
-			cfg.ForgejoAPIURL = customCfg[0].ForgejoAPIURL
+		if customCfg[0].GitHubRepo != "" {
+			cfg.GitHubRepo = customCfg[0].GitHubRepo
 		}
-		if customCfg[0].NexusBaseURL != "" {
-			cfg.NexusBaseURL = strings.TrimRight(customCfg[0].NexusBaseURL, "/")
+		if customCfg[0].GitHubAPIURL != "" {
+			cfg.GitHubAPIURL = customCfg[0].GitHubAPIURL
 		}
-		if customCfg[0].NexusSearchURL != "" {
-			cfg.NexusSearchURL = customCfg[0].NexusSearchURL
-		} else if customCfg[0].ForgejoAPIURL != "" {
-			// Si en customCfg se especifica ForgejoAPIURL sin NexusSearchURL (como en los tests con mock de Forgejo),
-			// vaciar NexusSearchURL para evitar llamadas de red a Nexus durante los tests.
-			cfg.NexusSearchURL = ""
+		if customCfg[0].DownloadBaseURL != "" {
+			cfg.DownloadBaseURL = strings.TrimRight(customCfg[0].DownloadBaseURL, "/")
 		}
 		if customCfg[0].CurrentVersion != "" {
 			cfg.CurrentVersion = customCfg[0].CurrentVersion
@@ -132,39 +128,18 @@ func parseSemVerParts(v string) [3]int {
 	return parts
 }
 
-type forgejoTagItem struct {
-	Name string `json:"name"`
-	ID   string `json:"id"`
+type gitHubAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
-type nexusSearchResponse struct {
-	Items []nexusSearchItem `json:"items"`
+type gitHubRelease struct {
+	TagName string        `json:"tag_name"`
+	Name    string        `json:"name"`
+	Assets  []gitHubAsset `json:"assets"`
 }
 
-type nexusSearchItem struct {
-	Group string `json:"group"`
-	Name  string `json:"name"`
-}
-
-func extractVersionFromNexusItem(group, name string) string {
-	var rawVer string
-	if strings.HasPrefix(group, "/gz-ia/") {
-		rawVer = strings.TrimPrefix(group, "/gz-ia/")
-		rawVer = strings.Split(rawVer, "/")[0]
-	} else if strings.HasPrefix(group, "gz-ia/") {
-		rawVer = strings.TrimPrefix(group, "gz-ia/")
-		rawVer = strings.Split(rawVer, "/")[0]
-	} else if idx := strings.Index(name, "/gz-ia/"); idx != -1 {
-		after := name[idx+len("/gz-ia/"):]
-		rawVer = strings.Split(after, "/")[0]
-	} else if idx := strings.Index(name, "gz-ia/"); idx != -1 {
-		after := name[idx+len("gz-ia/"):]
-		rawVer = strings.Split(after, "/")[0]
-	}
-	return NormalizeVersion(rawVer)
-}
-
-func buildReleaseInfo(latestVer, latestTag, currentVersion, nexusBaseURL string) *ReleaseInfo {
+func buildReleaseInfo(latestVer, latestTag, currentVersion, downloadBaseURL string, assets []gitHubAsset) *ReleaseInfo {
 	currentVer := NormalizeVersion(currentVersion)
 	isNewer := false
 	if currentVer == "dev" || currentVer == "" || currentVer == "none" {
@@ -173,10 +148,18 @@ func buildReleaseInfo(latestVer, latestTag, currentVersion, nexusBaseURL string)
 		isNewer = true
 	}
 
+	goos := runtime.GOOS
 	goarch := runtime.GOARCH
-	pkgName := fmt.Sprintf("gz-ia_%s_linux_%s", latestVer, goarch)
+	pkgName := fmt.Sprintf("gz-ia_%s_%s_%s", latestVer, goos, goarch)
 	tarballName := fmt.Sprintf("%s.tar.gz", pkgName)
-	downloadURL := fmt.Sprintf("%s/%s/%s", strings.TrimRight(nexusBaseURL, "/"), latestVer, tarballName)
+
+	downloadURL := fmt.Sprintf("%s/%s/%s", strings.TrimRight(downloadBaseURL, "/"), latestTag, tarballName)
+	for _, asset := range assets {
+		if asset.Name == tarballName && asset.BrowserDownloadURL != "" {
+			downloadURL = asset.BrowserDownloadURL
+			break
+		}
+	}
 
 	return &ReleaseInfo{
 		Tag:         latestTag,
@@ -188,121 +171,44 @@ func buildReleaseInfo(latestVer, latestTag, currentVersion, nexusBaseURL string)
 	}
 }
 
-func (u *updaterService) checkLatestFromNexus(ctx context.Context) (*ReleaseInfo, error) {
-	if u.cfg.NexusSearchURL == "" {
-		return nil, fmt.Errorf("NexusSearchURL no configurado")
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.cfg.NexusSearchURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("error creando petición a Nexus search: %w", err)
-	}
-	req.Header.Set("User-Agent", "gz-ia-updater")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := u.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error consultando componentes en Nexus (%s): %w", u.cfg.NexusSearchURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("la API de Nexus retornó estado HTTP %d", resp.StatusCode)
-	}
-
-	var searchResp nexusSearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
-		return nil, fmt.Errorf("error decodificando respuesta de Nexus search: %w", err)
-	}
-
-	var latestVer string
-	for _, item := range searchResp.Items {
-		ver := extractVersionFromNexusItem(item.Group, item.Name)
-		if ver == "" {
-			continue
-		}
-		if latestVer == "" || CompareVersions(ver, latestVer) > 0 {
-			latestVer = ver
-		}
-	}
-
-	if latestVer == "" {
-		return nil, fmt.Errorf("no se encontraron versiones de gz-ia en Nexus")
-	}
-
-	return buildReleaseInfo(latestVer, "v"+latestVer, u.cfg.CurrentVersion, u.cfg.NexusBaseURL), nil
-}
-
-func (u *updaterService) checkLatestFromForgejo(ctx context.Context) (*ReleaseInfo, error) {
-	if u.cfg.ForgejoAPIURL == "" {
-		return nil, fmt.Errorf("ForgejoAPIURL no configurado")
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.cfg.ForgejoAPIURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("error creando petición a Forgejo: %w", err)
-	}
-	req.Header.Set("User-Agent", "gz-ia-updater")
-
-	resp, err := u.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error consultando tags en Forgejo (%s): %w", u.cfg.ForgejoAPIURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("la API de Forgejo retornó estado HTTP %d", resp.StatusCode)
-	}
-
-	var tags []forgejoTagItem
-	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
-		return nil, fmt.Errorf("error decodificando respuesta de tags de Forgejo: %w", err)
-	}
-
-	if len(tags) == 0 {
-		return nil, fmt.Errorf("no se encontraron tags publicados en el repositorio")
-	}
-
-	var latestTag string
-	var latestVer string
-	for _, t := range tags {
-		norm := NormalizeVersion(t.Name)
-		if latestVer == "" || CompareVersions(norm, latestVer) > 0 {
-			latestVer = norm
-			latestTag = t.Name
-		}
-	}
-	if latestTag == "" {
-		latestTag = tags[0].Name
-		latestVer = NormalizeVersion(latestTag)
-	}
-
-	return buildReleaseInfo(latestVer, latestTag, u.cfg.CurrentVersion, u.cfg.NexusBaseURL), nil
-}
-
-// CheckLatest consulta la última versión disponible primero en Nexus y luego en Forgejo como fallback.
+// CheckLatest consulta la última versión disponible en GitHub Releases.
 func (u *updaterService) CheckLatest(ctx context.Context) (*ReleaseInfo, error) {
-	var nexusErr error
-	if u.cfg.NexusSearchURL != "" {
-		info, err := u.checkLatestFromNexus(ctx)
-		if err == nil && info != nil {
-			return info, nil
-		}
-		nexusErr = err
+	if u.cfg.GitHubAPIURL == "" {
+		return nil, fmt.Errorf("GitHubAPIURL no configurado")
 	}
 
-	info, forgejoErr := u.checkLatestFromForgejo(ctx)
-	if forgejoErr == nil && info != nil {
-		return info, nil
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.cfg.GitHubAPIURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creando petición a GitHub Releases: %w", err)
+	}
+	req.Header.Set("User-Agent", "gz-ia-updater")
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	resp, err := u.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error consultando GitHub Releases (%s): %w", u.cfg.GitHubAPIURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("la API de GitHub retornó estado HTTP %d", resp.StatusCode)
 	}
 
-	if nexusErr != nil && forgejoErr != nil {
-		return nil, fmt.Errorf("error al verificar actualizaciones (Nexus: %v; Forgejo: %v)", nexusErr, forgejoErr)
+	var rel gitHubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return nil, fmt.Errorf("error decodificando respuesta de GitHub Releases: %w", err)
 	}
-	if nexusErr != nil {
-		return nil, nexusErr
+
+	if rel.TagName == "" {
+		return nil, fmt.Errorf("no se encontró información de versión (tag_name) en GitHub Releases")
 	}
-	return nil, forgejoErr
+
+	latestVer := NormalizeVersion(rel.TagName)
+	if latestVer == "" {
+		return nil, fmt.Errorf("tag_name inválido en GitHub Releases: %s", rel.TagName)
+	}
+
+	return buildReleaseInfo(latestVer, rel.TagName, u.cfg.CurrentVersion, u.cfg.DownloadBaseURL, rel.Assets), nil
 }
 
 func resolveInstallDir(installDir string) (string, error) {
@@ -335,23 +241,29 @@ func (u *updaterService) Update(ctx context.Context, targetVer string, installDi
 		return nil, fmt.Errorf("error asegurando directorio de instalación %s: %w", installDir, err)
 	}
 
-	verToInstall := NormalizeVersion(targetVer)
-	if verToInstall == "" {
+	var downloadURL string
+	var verToInstall string
+
+	if targetVer == "" {
 		info, err := u.CheckLatest(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("error determinando la última versión: %w", err)
 		}
 		verToInstall = info.Version
+		downloadURL = info.DownloadURL
+	} else {
+		verToInstall = NormalizeVersion(targetVer)
+		tag := "v" + verToInstall
+		goos := runtime.GOOS
+		goarch := runtime.GOARCH
+		tarballName := fmt.Sprintf("gz-ia_%s_%s_%s.tar.gz", verToInstall, goos, goarch)
+		downloadURL = fmt.Sprintf("%s/%s/%s", strings.TrimRight(u.cfg.DownloadBaseURL, "/"), tag, tarballName)
 	}
 
 	goarch := runtime.GOARCH
-	if goarch != "amd64" && goarch != "arm64" {
-		return nil, fmt.Errorf("arquitectura '%s' no soportada (solo linux amd64 y arm64)", goarch)
+	if goarch != "amd64" {
+		return nil, fmt.Errorf("arquitectura '%s' no soportada (solo amd64)", goarch)
 	}
-
-	pkgName := fmt.Sprintf("gz-ia_%s_linux_%s", verToInstall, goarch)
-	tarballName := fmt.Sprintf("%s.tar.gz", pkgName)
-	downloadURL := fmt.Sprintf("%s/%s/%s", strings.TrimRight(u.cfg.NexusBaseURL, "/"), verToInstall, tarballName)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
@@ -361,12 +273,12 @@ func (u *updaterService) Update(ctx context.Context, targetVer string, installDi
 
 	resp, err := u.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("error descargando paquete desde Nexus (%s): %w", downloadURL, err)
+		return nil, fmt.Errorf("error descargando paquete desde GitHub Releases (%s): %w", downloadURL, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Nexus retornó HTTP %d al solicitar paquete %s. Verifica que la versión esté publicada", resp.StatusCode, tarballName)
+		return nil, fmt.Errorf("GitHub retornó HTTP %d al solicitar paquete desde %s. Verifica que la versión esté publicada", resp.StatusCode, downloadURL)
 	}
 
 	gzReader, err := gzip.NewReader(resp.Body)

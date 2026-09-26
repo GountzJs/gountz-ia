@@ -27,9 +27,9 @@ func newUpdateCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "update",
-		Short: "Actualiza gz-ia a la última versión disponible desde Nexus",
-		Long: `Comprueba si existen nuevas versiones de gz-ia en los repositorios
-de Forgejo y Nexus, y permite la actualización atómica del binario en el sistema.`,
+		Short: "Actualiza gz-ia a la última versión disponible desde GitHub Releases",
+		Long: `Comprueba si existen nuevas versiones de gz-ia en GitHub Releases
+y permite la actualización atómica del binario en el sistema.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			icons := tui.GetIcons()
 			svc := getUpdaterService()

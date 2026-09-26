@@ -264,7 +264,7 @@ func TestClient_HandleUpdate_NewVersion_Declined(t *testing.T) {
 func TestClient_HandleUpdate_CheckLatestError(t *testing.T) {
 	mockUpd := &mockUpdaterService{
 		checkLatestFunc: func(ctx context.Context) (*updater.ReleaseInfo, error) {
-			return nil, errors.New("fallo de red en forgejo")
+			return nil, errors.New("fallo de red en github")
 		},
 	}
 

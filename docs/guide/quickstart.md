@@ -7,8 +7,8 @@ Esta guía te conducirá paso a paso para instalar, verificar y ejecutar tu prim
 ## 1. Prerrequisitos y Plataformas
 
 - **Plataformas Soportadas:**
-  - **Linux nativo:** Distribuciones modernas con kernel Linux 4.x+ (Ubuntu, Debian, Fedora, Arch).
-  - **Windows bajo WSL2:** En sistemas Windows corporativos, se recomienda ejecutar bajo **WSL2** (Windows Subsystem for Linux 2) para compatibilidad con el sistema de archivos de Git y señales POSIX.
+  - **Linux:** Distribuciones modernas de 64 bits (Ubuntu, Debian, Fedora, Arch, etc.).
+  - **Windows:** Soporte para Windows (amd64 / x86_64).
 - **Git:** Versión `2.20+` con soporte de `git worktree`.
 - **Al menos un agente de terminal instalado:**
   - [Google Antigravity (`agy`)](/guide/providers#google-antigravity-agy)
@@ -23,14 +23,8 @@ Esta guía te conducirá paso a paso para instalar, verificar y ejecutar tu prim
 ::: code-group
 
 ```bash [GitHub (Recomendado)]
-# Instalación universal automática (Linux / macOS / WSL2)
+# Instalación automática para Linux (amd64)
 curl -fsSL https://raw.githubusercontent.com/GountzJs/gountz-ia/main/install.sh | bash
-```
-
-```bash [Descarga directa (Nexus)]
-# Descarga directa del tarball compilado para Linux amd64
-curl -fsSL https://nexus.pipis.app/repository/raw-releases/gz-ia/latest/gz-ia-linux-amd64.tar.gz | tar -xz
-sudo install -m 755 gz-ia /usr/local/bin/
 ```
 
 ```bash [Compilación desde código (Make)]
@@ -46,7 +40,7 @@ sudo cp bin/gz-ia /usr/local/bin/
 ::: tip Actualización de instalaciones existentes
 Una vez que dispones de `gz-ia` instalado, puedes verificar y aplicar nuevas versiones directamente con el comando de auto-actualización:
 ```bash
-# Comprobar si hay versiones más recientes en Nexus / Forgejo
+# Comprobar si hay versiones más recientes en GitHub Releases
 gz-ia update --check
 
 # Descargar e instalar la actualización in-place

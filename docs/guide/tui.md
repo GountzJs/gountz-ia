@@ -78,8 +78,8 @@ Permite gestionar los registros locales de `.harness/sessions/`:
 
 ### 3. Actualizador Integrado
 
-Permite comprobar la existencia de nuevas versiones publicadas en Nexus o Forgejo:
-- Consulta los endpoints en segundo plano sin congelar la terminal.
+Permite comprobar la existencia de nuevas versiones publicadas en GitHub Releases:
+- Consulta las versiones en segundo plano sin congelar la terminal.
 - Si hay una actualización disponible, muestra los detalles y solicita confirmación con un cuadro de diálogo `huh.NewConfirm()`.
 - Si el binario ya está al día, informa amigablemente con un panel de estilo Lipgloss.
 
