@@ -129,7 +129,14 @@ func (r *OSRunner) Run(ctx context.Context, binary string, args []string, dir st
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	configureSysProcAttr(cmd)
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			return killProcessGroup(cmd.Process.Pid)
+		}
+		return nil
+	}
+	restoreTTY := configureSysProcAttr(cmd)
+	defer restoreTTY()
 	if len(r.Env) > 0 {
 		cmd.Env = r.Env
 	}
@@ -143,6 +150,7 @@ func (r *OSRunner) Run(ctx context.Context, binary string, args []string, dir st
 	}
 
 	waitErr := cmd.Wait()
+	restoreTTY()
 	exitCode := 0
 	if waitErr != nil {
 		var exitError *exec.ExitError
@@ -268,37 +276,50 @@ func (s *Session) Start(ctx context.Context) error {
 		}
 	}
 
-	// Proyección modular de directivas y tooling (unificado para evitar clobbering)
-	projected := false
+	// Proyección modular de directivas y tooling (unificado bajo el proyector de Tooling)
 	if s.Tooling != nil && len(s.Config.Profiles) > 0 {
 		var activeToolkitIDs []string
+		mcpServers := make(map[string]any)
+		envVars := make(map[string]string)
+
 		for _, profName := range s.Config.Profiles {
 			if profCfg, err := s.Tooling.GetProfile(ctx, profName); err == nil && profCfg != nil {
 				activeToolkitIDs = append(activeToolkitIDs, profCfg.Toolkits...)
-			}
-		}
-		if len(activeToolkitIDs) > 0 {
-			composedTooling, err := s.Tooling.ComposeToolkits(ctx, activeToolkitIDs)
-			if err != nil {
-				return fmt.Errorf("error al componer toolkits en tooling: %w", err)
-			}
-			if composedTooling != nil {
-				if projErr := s.Tooling.ProjectIntoWorktree(ctx, ws.TargetDir, composedTooling, s.Config.ID); projErr != nil {
-					return fmt.Errorf("error al proyectar tooling en el worktree: %w", projErr)
+				for k, v := range profCfg.MCPServers {
+					mcpServers[k] = v
 				}
-				projected = true
+				for k, v := range profCfg.Env {
+					envVars[k] = v
+				}
 			}
 		}
-	}
 
-	// Fallback a Profile únicamente si Tooling no manejó los perfiles
-	if !projected && s.Profile != nil && len(s.Config.Profiles) > 0 {
-		composed, err := s.Profile.Compose(ctx, s.Config.Profiles)
-		if err != nil {
-			return fmt.Errorf("error al componer perfiles agénticos: %w", err)
+		// Si s.Profile también tiene definiciones de perfil (ej. MCP servers o directivas), integrarlos
+		if s.Profile != nil {
+			if profComposed, err := s.Profile.Compose(ctx, s.Config.Profiles); err == nil && profComposed != nil {
+				for k, v := range profComposed.MCPServers {
+					mcpServers[k] = v
+				}
+				for k, v := range profComposed.Env {
+					envVars[k] = v
+				}
+			}
 		}
-		if err := s.Profile.Project(ctx, ws.TargetDir, composed, s.Config.ID, s.Config.Provider); err != nil {
-			return fmt.Errorf("error al proyectar perfiles en el workspace: %w", err)
+
+		composedTooling, err := s.Tooling.ComposeToolkits(ctx, activeToolkitIDs)
+		if err != nil {
+			return fmt.Errorf("error al componer toolkits en tooling: %w", err)
+		}
+		if composedTooling != nil {
+			for k, v := range mcpServers {
+				composedTooling.MCPServers[k] = v
+			}
+			for k, v := range envVars {
+				composedTooling.Env[k] = v
+			}
+			if projErr := s.Tooling.ProjectIntoWorktree(ctx, ws.TargetDir, composedTooling, s.Config.ID, ws.WorkingDir); projErr != nil {
+				return fmt.Errorf("error al proyectar tooling en el worktree: %w", projErr)
+			}
 		}
 	}
 

@@ -3,6 +3,7 @@ package profile
 import (
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -87,18 +88,20 @@ func (c *Composer) Compose(profileNames []string) (*ComposedProfile, error) {
 			composed.AgentsFiles[targetName] = p.AgentsPath
 		}
 
-		// 3. Fusionar servidores MCP con detección de colisiones
+		// 3. Fusionar servidores MCP con detección de colisiones (tolera configuraciones idénticas)
 		for serverName, srvDef := range p.MCPServers {
-			if _, conflict := composed.MCPServers[serverName]; conflict {
-				return nil, fmt.Errorf("colisión de servidores MCP: el servidor '%s' está definido en múltiples perfiles", serverName)
+			if existingDef, conflict := composed.MCPServers[serverName]; conflict {
+				if !reflect.DeepEqual(existingDef, srvDef) {
+					return nil, fmt.Errorf("colisión de servidores MCP: el servidor '%s' está definido con configuraciones distintas entre perfiles", serverName)
+				}
 			}
 			composed.MCPServers[serverName] = srvDef
 		}
 
-		// 4. Fusionar variables de entorno con detección de colisiones
+		// 4. Fusionar variables de entorno con detección de colisiones (sin filtrar secretos en el error)
 		for k, v := range p.Env {
 			if existingVal, conflict := composed.Env[k]; conflict && existingVal != v {
-				return nil, fmt.Errorf("colisión de variable de entorno '%s': definida con valores distintos entre perfiles ('%s' vs '%s')", k, existingVal, v)
+				return nil, fmt.Errorf("colisión de variable de entorno '%s': definida con valores distintos entre perfiles", k)
 			}
 			composed.Env[k] = v
 		}

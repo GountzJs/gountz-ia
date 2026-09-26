@@ -3,12 +3,12 @@
 package session
 
 import (
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // killProcessGroup termina de forma ordenada y garantizada el árbol de procesos en Windows usando taskkill.
@@ -17,28 +17,32 @@ func killProcessGroup(pid int) error {
 		return errors.New("PID inválido")
 	}
 
-	// 1. Verificar si el proceso existe
+	pidStr := strconv.Itoa(pid)
+
+	// 1. Verificar si el proceso existe inspeccionando exactamente la columna PID
 	checkCmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH")
 	out, err := checkCmd.Output()
-	if err != nil || !strings.Contains(string(out), strconv.Itoa(pid)) {
+	if err != nil {
 		return fmt.Errorf("el proceso con PID %d ya no se encuentra en ejecución", pid)
 	}
 
-	// 2. Intentar terminación ordenada con taskkill /T /PID <pid>
-	_ = exec.Command("taskkill", "/T", "/PID", strconv.Itoa(pid)).Run()
-
-	// 3. Periodo de gracia de 1.5 segundos
-	deadline := time.Now().Add(1500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		time.Sleep(150 * time.Millisecond)
-		check := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH")
-		chkOut, chkErr := check.Output()
-		if chkErr != nil || !strings.Contains(string(chkOut), strconv.Itoa(pid)) {
-			return nil
+	r := csv.NewReader(strings.NewReader(string(out)))
+	records, err := r.ReadAll()
+	found := false
+	if err == nil {
+		for _, rec := range records {
+			if len(rec) >= 2 && strings.TrimSpace(rec[1]) == pidStr {
+				found = true
+				break
+			}
 		}
 	}
+	if !found {
+		return fmt.Errorf("el proceso con PID %d ya no se encuentra en ejecución", pid)
+	}
 
-	// 4. Forzar terminación con /F /T
-	_ = exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).Run()
+	// 2. En Windows, los procesos de consola (agentes de terminal y servidores MCP)
+	// ignoran WM_CLOSE (taskkill sin /F). Se aplica /F /T para terminar el árbol de procesos de forma garantizada.
+	_ = exec.Command("taskkill", "/F", "/T", "/PID", pidStr).Run()
 	return nil
 }

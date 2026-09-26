@@ -434,15 +434,41 @@ func (p *GitProvider) DiffWorktree(ctx context.Context, baseDir string, worktree
 	// 2. Si el worktree existe físicamente en disco, inspeccionar directamente en su directorio
 	if worktreeDir != "" {
 		if fi, err := os.Stat(worktreeDir); err == nil && fi.IsDir() {
+			sessionID := strings.TrimPrefix(branchName, "harness/")
+			manifest, _ := LoadManifest(baseDir, sessionID)
+
 			diffArgs := []string{"diff"}
 			if statOnly {
 				diffArgs = append(diffArgs, "--stat")
 			}
 			diffArgs = append(diffArgs, baseRef)
-			trackedDiff, _ := p.git.Run(ctx, worktreeDir, diffArgs...)
+
+			if manifest != nil {
+				var pathspecs []string
+				for relPath, expectedHash := range manifest.ProjectedHash {
+					filePath := filepath.Join(worktreeDir, relPath)
+					if curBytes, err := os.ReadFile(filePath); err == nil {
+						if HashBytes(curBytes) == expectedHash {
+							pathspecs = append(pathspecs, ":!"+relPath)
+						}
+					}
+				}
+				if len(pathspecs) > 0 {
+					diffArgs = append(diffArgs, "--")
+					diffArgs = append(diffArgs, pathspecs...)
+				}
+			}
+
+			trackedDiff, tErr := p.git.Run(ctx, worktreeDir, diffArgs...)
+			if tErr != nil {
+				return "", fmt.Errorf("error al obtener diff en worktree: %w", tErr)
+			}
 
 			// Detectar archivos untracked usando git status --porcelain sin alterar el índice de git
-			statusOut, _ := p.git.Run(ctx, worktreeDir, "status", "--porcelain")
+			statusOut, sErr := p.git.Run(ctx, worktreeDir, "status", "--porcelain")
+			if sErr != nil {
+				return "", fmt.Errorf("error al obtener status en worktree: %w", sErr)
+			}
 			var untrackedDiffs []string
 
 			// Comprobar si AGENTS.md está trackeado en el repositorio base HEAD
@@ -459,12 +485,34 @@ func (p *GitProvider) DiffWorktree(ctx context.Context, baseDir string, worktree
 					if f == "" {
 						continue
 					}
-					// Ignorar artefactos efímeros proyectados de gz-ia
-					if isHarnessArtifact(f) {
-						continue
-					}
-					if f == "AGENTS.md" && !trackedAgents {
-						continue
+					if manifest != nil {
+						isCreated := false
+						for _, cf := range manifest.CreatedFiles {
+							if cf == f || strings.HasPrefix(f, cf+"/") || strings.HasPrefix(f, cf+"\\") {
+								isCreated = true
+								break
+							}
+						}
+						if isCreated {
+							if expectedHash, hasHash := manifest.ProjectedHash[f]; hasHash {
+								filePath := filepath.Join(worktreeDir, f)
+								if curBytes, err := os.ReadFile(filePath); err == nil {
+									if HashBytes(curBytes) == expectedHash {
+										continue
+									}
+								}
+							} else {
+								continue
+							}
+						}
+					} else {
+						// Ignorar artefactos efímeros proyectados de gz-ia
+						if isHarnessArtifact(f) {
+							continue
+						}
+						if f == "AGENTS.md" && !trackedAgents {
+							continue
+						}
 					}
 
 					var uArgs []string
@@ -541,40 +589,68 @@ func (p *GitProvider) MergeWorktree(ctx context.Context, sessionID string, baseD
 	// 1. Si en el worktree hay archivos sin comitear (uncommitted/untracked), prepararlos y comitearlos en la rama del worktree
 	if worktreeDir != "" {
 		if fi, err := os.Stat(worktreeDir); err == nil && fi.IsDir() {
-			// A. Comprobar si AGENTS.md estaba trackeado en el repositorio base en HEAD
-			trackedInHead := false
-			if _, chkErr := p.git.Run(ctx, baseDir, "cat-file", "-e", "HEAD:AGENTS.md"); chkErr == nil {
-				trackedInHead = true
-			}
-
-			if trackedInHead {
-				// Restaurar el AGENTS.md original del proyecto en el worktree antes de cualquier add/commit
-				_, _ = p.git.Run(ctx, worktreeDir, "checkout", "HEAD", "--", "AGENTS.md")
-			} else {
-				// Eliminar el AGENTS.md sintético proyectado de la sesión
-				_ = os.Remove(filepath.Join(worktreeDir, "AGENTS.md"))
-			}
-
-			// B. Purgar del disco y del cache de git cualquier artefacto proyectado (.agents, .mcp.json, *-AGENTS.md)
-			_ = os.RemoveAll(filepath.Join(worktreeDir, ".agents"))
-			_ = os.Remove(filepath.Join(worktreeDir, ".mcp.json"))
-			if matches, err := filepath.Glob(filepath.Join(worktreeDir, "*-AGENTS.md")); err == nil {
-				for _, m := range matches {
-					_ = os.Remove(m)
+			manifest, _ := LoadManifest(baseDir, sessionID)
+			if manifest != nil {
+				// A. Restaurar archivos originales que no fueron editados por el agente
+				for relPath, origContent := range manifest.OriginalFiles {
+					filePath := filepath.Join(worktreeDir, relPath)
+					if curBytes, err := os.ReadFile(filePath); err == nil {
+						if expectedHash, ok := manifest.ProjectedHash[relPath]; ok && HashBytes(curBytes) == expectedHash {
+							_ = os.WriteFile(filePath, []byte(origContent), 0644)
+						}
+					}
 				}
+
+				// B. Eliminar archivos creados por gz-ia que no fueron editados por el agente
+				for _, relPath := range manifest.CreatedFiles {
+					filePath := filepath.Join(worktreeDir, relPath)
+					if curBytes, err := os.ReadFile(filePath); err == nil {
+						if expectedHash, ok := manifest.ProjectedHash[relPath]; ok && HashBytes(curBytes) == expectedHash {
+							_ = os.Remove(filePath)
+							_, _ = p.git.Run(ctx, worktreeDir, "rm", "-f", "--cached", "--ignore-unmatch", relPath)
+						}
+					} else {
+						// Symlink o directorio
+						if _, lerr := os.Lstat(filePath); lerr == nil {
+							_ = os.RemoveAll(filePath)
+							_, _ = p.git.Run(ctx, worktreeDir, "rm", "-rf", "--cached", "--ignore-unmatch", relPath)
+						}
+					}
+				}
+				_ = removeEmptyDirs(filepath.Join(worktreeDir, ".agents"))
+			} else {
+				// Fallback si no hay manifiesto:
+				// Restaurar AGENTS.md si estaba trackeado
+				if _, chkErr := p.git.Run(ctx, baseDir, "cat-file", "-e", "HEAD:AGENTS.md"); chkErr == nil {
+					_, _ = p.git.Run(ctx, worktreeDir, "checkout", "HEAD", "--", "AGENTS.md")
+				} else {
+					_ = os.Remove(filepath.Join(worktreeDir, "AGENTS.md"))
+				}
+				// Solo restaurar .mcp.json si estaba en HEAD
+				if _, chkErr := p.git.Run(ctx, baseDir, "cat-file", "-e", "HEAD:.mcp.json"); chkErr == nil {
+					_, _ = p.git.Run(ctx, worktreeDir, "checkout", "HEAD", "--", ".mcp.json")
+				} else {
+					_ = os.Remove(filepath.Join(worktreeDir, ".mcp.json"))
+				}
+				if matches, err := filepath.Glob(filepath.Join(worktreeDir, "*-AGENTS.md")); err == nil {
+					for _, m := range matches {
+						_ = os.Remove(m)
+					}
+				}
+				_ = os.RemoveAll(filepath.Join(worktreeDir, ".agents", "skills"))
+				_ = removeEmptyDirs(filepath.Join(worktreeDir, ".agents"))
 			}
-			_, _ = p.git.Run(ctx, worktreeDir, "rm", "-rf", "--cached", "--ignore-unmatch", ".agents", ".mcp.json", "*-AGENTS.md", "AGENTS.md")
 
 			statusOut, _ := p.git.Run(ctx, worktreeDir, "status", "--porcelain")
 			if strings.TrimSpace(statusOut) != "" {
 				if _, err := p.git.Run(ctx, worktreeDir, "add", "-A"); err != nil {
 					return nil, fmt.Errorf("error al preparar cambios en worktree: %w", err)
 				}
-				commitMsg := fmt.Sprintf("harness(%s): session changes", sessionID)
-				if _, err := p.git.Run(ctx, worktreeDir, "commit", "-m", commitMsg); err != nil {
+				commitMsg := fmt.Sprintf("chore(harness): session %s changes", sessionID)
+				if _, err := p.git.Run(ctx, worktreeDir, "commit", "--no-verify", "-m", commitMsg); err != nil {
 					// Fallback si falta git config de usuario
 					if strings.Contains(err.Error(), "user.name") || strings.Contains(err.Error(), "tell me who you are") {
-						_, err = p.git.Run(ctx, worktreeDir, "-c", "user.name=gz-ia", "-c", "user.email=gz-ia@localhost", "commit", "-m", commitMsg)
+						_, err = p.git.Run(ctx, worktreeDir, "-c", "user.name=gz-ia", "-c", "user.email=gz-ia@localhost", "commit", "--no-verify", "-m", commitMsg)
 					}
 					if err != nil {
 						return nil, fmt.Errorf("error al comitear cambios en worktree: %w", err)
@@ -609,10 +685,10 @@ func (p *GitProvider) MergeWorktree(ctx context.Context, sessionID string, baseD
 		if !noCommit {
 			st, _ := p.git.Run(ctx, baseDir, "status", "--porcelain")
 			if strings.TrimSpace(st) != "" {
-				commitMsg := fmt.Sprintf("harness(%s): merge session changes (squash)", sessionID)
-				cOut, cErr := p.git.Run(ctx, baseDir, "commit", "-m", commitMsg)
+				commitMsg := fmt.Sprintf("chore(harness): merge session %s changes (squash)", sessionID)
+				cOut, cErr := p.git.Run(ctx, baseDir, "commit", "--no-verify", "-m", commitMsg)
 				if cErr != nil && (strings.Contains(cErr.Error(), "user.name") || strings.Contains(cErr.Error(), "tell me who you are")) {
-					cOut, cErr = p.git.Run(ctx, baseDir, "-c", "user.name=gz-ia", "-c", "user.email=gz-ia@localhost", "commit", "-m", commitMsg)
+					cOut, cErr = p.git.Run(ctx, baseDir, "-c", "user.name=gz-ia", "-c", "user.email=gz-ia@localhost", "commit", "--no-verify", "-m", commitMsg)
 				}
 				if cErr != nil {
 					return nil, fmt.Errorf("error al comitear squash merge: %w (%s)", cErr, cOut)
@@ -629,8 +705,11 @@ func (p *GitProvider) MergeWorktree(ctx context.Context, sessionID string, baseD
 			return nil, fmt.Errorf("error al ejecutar git merge --no-commit: %w (%s)", mergeErr, mergeOut)
 		}
 	} else {
-		commitMsg := fmt.Sprintf("harness(%s): merge session changes", sessionID)
-		mergeOut, mergeErr = p.git.Run(ctx, baseDir, "merge", branchName, "-m", commitMsg)
+		commitMsg := fmt.Sprintf("chore(harness): merge session %s changes", sessionID)
+		mergeOut, mergeErr = p.git.Run(ctx, baseDir, "merge", "--no-verify", branchName, "-m", commitMsg)
+		if mergeErr != nil && strings.Contains(mergeErr.Error(), "unknown option") {
+			mergeOut, mergeErr = p.git.Run(ctx, baseDir, "merge", branchName, "-m", commitMsg)
+		}
 		if mergeErr != nil {
 			if strings.Contains(strings.ToLower(mergeOut), "conflict") {
 				return nil, fmt.Errorf("conflicto al fusionar cambios: Git detuvo el merge sin sobreescribir archivos.\n%s\nPuedes resolver los conflictos manualmente o abortar con 'git merge --abort'. El worktree permanece intacto (inspecciona con 'gz-ia session path %s')", strings.TrimSpace(mergeOut), sessionID)
@@ -718,8 +797,14 @@ func (p *GitProvider) ensureGitExcludeHarness(ctx context.Context, baseDir strin
 // para evitar que el agente (incluso en autonomous) pueda modificar ramas fuera de harness/<sessionID> o hacer git push,
 // reenviando además los hooks de pre-commit y commit-msg del proyecto si existen.
 func (p *GitProvider) installWorktreeGuardrails(ctx context.Context, baseDir string, worktreeDir string, sessionID string) error {
-	if _, err := p.git.Run(ctx, baseDir, "config", "extensions.worktreeConfig", "true"); err != nil {
-		return fmt.Errorf("error al activar extensions.worktreeConfig en baseDir: %w", err)
+	wtCfgOut, _ := p.git.Run(ctx, baseDir, "config", "--get", "extensions.worktreeConfig")
+	if strings.TrimSpace(wtCfgOut) != "true" {
+		if _, err := p.git.Run(ctx, baseDir, "config", "extensions.worktreeConfig", "true"); err != nil {
+			return fmt.Errorf("error al activar extensions.worktreeConfig en baseDir: %w", err)
+		}
+		markerPath := filepath.Join(baseDir, ".harness", ".worktree_config_set")
+		_ = os.MkdirAll(filepath.Dir(markerPath), 0755)
+		_ = os.WriteFile(markerPath, []byte("true"), 0644)
 	}
 
 	gitDirOut, err := p.git.Run(ctx, worktreeDir, "rev-parse", "--git-dir")
@@ -770,23 +855,30 @@ exit 0
 	_ = os.WriteFile(refTxPath, []byte(refTxScript), 0755)
 	_ = os.Chmod(refTxPath, 0755)
 
-	// Reenviar hooks del proyecto (husky / lint-staged / commitlint) si existen
+	// Resolver core.hooksPath del repo original para reenviar hooks respetando su entorno y wrappers (husky)
+	origHooksPathOut, _ := p.git.Run(ctx, baseDir, "config", "--get", "core.hooksPath")
+	origHooksPath := strings.TrimSpace(origHooksPathOut)
+	if origHooksPath == "" {
+		origHooksPath = filepath.Join(baseDir, ".git", "hooks")
+	} else if !filepath.IsAbs(origHooksPath) {
+		origHooksPath = filepath.Join(baseDir, origHooksPath)
+	}
+
 	forwardHook := func(hookName string) {
-		huskyHook := filepath.Join(baseDir, ".husky", hookName)
-		gitHook := filepath.Join(baseDir, ".git", "hooks", hookName)
+		targetHook := filepath.Join(hooksDir, hookName)
+		origHook := filepath.Join(origHooksPath, hookName)
 		hookScript := fmt.Sprintf(`#!/bin/sh
 # Reenviador automático de gz-ia hacia hooks del proyecto principal
-if [ -f "%s" ]; then
-    sh "%s" "$@"
+orig_hook="%s"
+if [ -x "$orig_hook" ]; then
+    "$orig_hook" "$@"
     exit $?
-fi
-if [ -f "%s" ]; then
-    sh "%s" "$@"
+elif [ -f "$orig_hook" ]; then
+    sh "$orig_hook" "$@"
     exit $?
 fi
 exit 0
-`, huskyHook, huskyHook, gitHook, gitHook)
-		targetHook := filepath.Join(hooksDir, hookName)
+`, origHook)
 		_ = os.WriteFile(targetHook, []byte(hookScript), 0755)
 		_ = os.Chmod(targetHook, 0755)
 	}
@@ -798,31 +890,39 @@ exit 0
 		return fmt.Errorf("error al configurar core.hooksPath en worktree: %w", err)
 	}
 
-	// Configurar core.excludesFile por worktree para ignorar artefactos efímeros proyectados
-	excludePath := filepath.Join(gitDir, "harness-exclude")
-	excludeContent := `# Artefactos efímeros proyectados por gz-ia para la sesión
-.agents/
-.mcp.json
-*-AGENTS.md
-`
-	if err := os.WriteFile(excludePath, []byte(excludeContent), 0644); err != nil {
-		return fmt.Errorf("error al escribir harness-exclude en worktree: %w", err)
-	}
-	if _, err := p.git.Run(ctx, worktreeDir, "config", "--worktree", "core.excludesFile", excludePath); err != nil {
-		return fmt.Errorf("error al configurar core.excludesFile en worktree: %w", err)
-	}
-
 	return nil
 }
 
 func (p *GitProvider) cleanupWorktreeConfigIfNoHarness(ctx context.Context, baseDir string) {
+	markerPath := filepath.Join(baseDir, ".harness", ".worktree_config_set")
+	if _, statErr := os.Stat(markerPath); statErr != nil {
+		return
+	}
 	branchesOut, err := p.git.Run(ctx, baseDir, "branch", "--list", "harness/*")
 	if err == nil && strings.TrimSpace(branchesOut) == "" {
 		wtOut, wtErr := p.git.Run(ctx, baseDir, "worktree", "list", "--porcelain")
 		if wtErr == nil && !strings.Contains(wtOut, "/.harness/worktrees/") && !strings.Contains(wtOut, "\\.harness\\worktrees\\") {
 			_, _ = p.git.Run(ctx, baseDir, "config", "--unset", "extensions.worktreeConfig")
+			_ = os.Remove(markerPath)
 		}
 	}
+}
+
+func removeEmptyDirs(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			_ = removeEmptyDirs(filepath.Join(dir, entry.Name()))
+		}
+	}
+	remaining, err := os.ReadDir(dir)
+	if err == nil && len(remaining) == 0 {
+		_ = os.Remove(dir)
+	}
+	return nil
 }
 
 func isHarnessArtifact(path string) bool {

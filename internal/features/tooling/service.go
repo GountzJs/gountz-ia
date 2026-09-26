@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
+	"gz-ia/internal/features/workspace"
 	"gz-ia/packages/orchy"
 	"gz-ia/packages/orchy/tools"
 )
@@ -19,7 +21,7 @@ type Service interface {
 	GetProfile(ctx context.Context, name string) (*ProfileConfig, error)
 	ComposeToolkits(ctx context.Context, toolkitIDs []string) (*ComposedTooling, error)
 	RegisterToolsInKernel(ctx context.Context, kernel *orchy.Kernel, tooling *ComposedTooling, workDir string) error
-	ProjectIntoWorktree(ctx context.Context, targetDir string, composed *ComposedTooling, sessionID string) error
+	ProjectIntoWorktree(ctx context.Context, targetDir string, composed *ComposedTooling, sessionID string, baseDir ...string) error
 	ToolingDir() string
 }
 
@@ -75,6 +77,8 @@ func (s *toolingService) ComposeToolkits(ctx context.Context, toolkitIDs []strin
 		RulesFiles:     make(map[string]string),
 		SkillPaths:     make(map[string]string),
 		Tools:          []DeclaredTool{},
+		MCPServers:     make(map[string]any),
+		Env:            make(map[string]string),
 	}
 
 	seenToolkits := make(map[string]bool)
@@ -128,6 +132,24 @@ func (s *toolingService) ComposeToolkits(ctx context.Context, toolkitIDs []strin
 			seenTools[tool.Name] = true
 			composed.Tools = append(composed.Tools, tool)
 		}
+
+		// 5. Servidores MCP
+		for srvName, srvDef := range tk.MCPServers {
+			if existingDef, conflict := composed.MCPServers[srvName]; conflict {
+				if !reflect.DeepEqual(existingDef, srvDef) {
+					return nil, fmt.Errorf("colisión de servidores MCP en tooling: el servidor '%s' está definido con configuraciones distintas", srvName)
+				}
+			}
+			composed.MCPServers[srvName] = srvDef
+		}
+
+		// 6. Variables de Entorno
+		for k, v := range tk.Env {
+			if existingVal, conflict := composed.Env[k]; conflict && existingVal != v {
+				return nil, fmt.Errorf("colisión de variables de entorno en tooling: variable '%s' con valores distintos", k)
+			}
+			composed.Env[k] = v
+		}
 	}
 
 	return composed, nil
@@ -151,11 +173,14 @@ func (s *toolingService) RegisterToolsInKernel(ctx context.Context, kernel *orch
 	return nil
 }
 
-// ProjectIntoWorktree materializa las capacidades del tooling en el directorio del worktree.
-func (s *toolingService) ProjectIntoWorktree(ctx context.Context, targetDir string, composed *ComposedTooling, sessionID string) error {
+// ProjectIntoWorktree materializa las capacidades del tooling en el directorio del worktree
+// registrando un manifiesto exacto de qué archivos fueron creados y cuáles originales fueron modificados.
+func (s *toolingService) ProjectIntoWorktree(ctx context.Context, targetDir string, composed *ComposedTooling, sessionID string, baseDir ...string) error {
 	if composed == nil || targetDir == "" {
 		return nil
 	}
+
+	manifest := workspace.NewManifest(sessionID)
 
 	// 1. Proyectar Skills en .agents/skills/
 	if len(composed.SkillPaths) > 0 {
@@ -163,7 +188,11 @@ func (s *toolingService) ProjectIntoWorktree(ctx context.Context, targetDir stri
 		_ = os.MkdirAll(skillsDir, 0755)
 
 		for skillName, srcPath := range composed.SkillPaths {
-			dstPath := filepath.Join(skillsDir, skillName)
+			relPath := filepath.Join(".agents", "skills", skillName)
+			dstPath := filepath.Join(targetDir, relPath)
+			if _, statErr := os.Lstat(dstPath); os.IsNotExist(statErr) {
+				manifest.CreatedFiles = append(manifest.CreatedFiles, relPath)
+			}
 			_ = os.Remove(dstPath)
 			if err := os.Symlink(srcPath, dstPath); err != nil {
 				_ = copyDir(srcPath, dstPath)
@@ -177,23 +206,49 @@ func (s *toolingService) ProjectIntoWorktree(ctx context.Context, targetDir stri
 		_ = os.MkdirAll(rulesDir, 0755)
 
 		for ruleFilename, srcPath := range composed.RulesFiles {
-			dstPath := filepath.Join(rulesDir, ruleFilename)
+			relPath := filepath.Join(".agents", "rules", ruleFilename)
+			dstPath := filepath.Join(targetDir, relPath)
+			if origBytes, err := os.ReadFile(dstPath); err == nil {
+				manifest.OriginalFiles[relPath] = string(origBytes)
+			} else {
+				manifest.CreatedFiles = append(manifest.CreatedFiles, relPath)
+			}
 			_ = copyFile(srcPath, dstPath)
+			if data, err := os.ReadFile(dstPath); err == nil {
+				manifest.ProjectedHash[relPath] = workspace.HashBytes(data)
+			}
 		}
 	}
 
 	// 3. Proyectar directivas de toolkits individuales (ej. TOOLKIT_COMMON-AGENTS.md)
 	for targetFilename, srcPath := range composed.AgentsFiles {
 		dstPath := filepath.Join(targetDir, targetFilename)
+		if origBytes, err := os.ReadFile(dstPath); err == nil {
+			manifest.OriginalFiles[targetFilename] = string(origBytes)
+		} else {
+			manifest.CreatedFiles = append(manifest.CreatedFiles, targetFilename)
+		}
 		_ = copyFile(srcPath, dstPath)
+		if data, err := os.ReadFile(dstPath); err == nil {
+			manifest.ProjectedHash[targetFilename] = workspace.HashBytes(data)
+		}
 	}
 
-	// 4. Redactar el AGENTS.md maestro unificado
-	masterContent := generateMasterAgentsMarkdown(composed, sessionID)
+	// 4. Redactar el AGENTS.md maestro unificado preservando reglas previas del proyecto si existían
 	masterPath := filepath.Join(targetDir, "AGENTS.md")
-	_ = os.WriteFile(masterPath, []byte(masterContent), 0644)
+	masterContent := generateMasterAgentsMarkdown(composed, sessionID)
+	if origBytes, err := os.ReadFile(masterPath); err == nil {
+		manifest.OriginalFiles["AGENTS.md"] = string(origBytes)
+		fullContent := fmt.Sprintf("# 📌 Reglas Originales del Proyecto\n\n%s\n\n---\n\n%s", strings.TrimSpace(string(origBytes)), masterContent)
+		_ = os.WriteFile(masterPath, []byte(fullContent), 0644)
+		manifest.ProjectedHash["AGENTS.md"] = workspace.HashBytes([]byte(fullContent))
+	} else {
+		manifest.CreatedFiles = append(manifest.CreatedFiles, "AGENTS.md")
+		_ = os.WriteFile(masterPath, []byte(masterContent), 0644)
+		manifest.ProjectedHash["AGENTS.md"] = workspace.HashBytes([]byte(masterContent))
+	}
 
-	// 5. Configurar el servidor MCP de gz-ia apuntando a sí mismo (Stdio)
+	// 5. Configurar servidores MCP integrando gz-ia y servidores del proyecto/toolkits
 	mcpConfig := map[string]any{
 		"mcpServers": map[string]any{
 			"gz-ia": map[string]any{
@@ -206,16 +261,51 @@ func (s *toolingService) ProjectIntoWorktree(ctx context.Context, targetDir stri
 			},
 		},
 	}
+	if len(composed.MCPServers) > 0 {
+		serversMap := mcpConfig["mcpServers"].(map[string]any)
+		for k, v := range composed.MCPServers {
+			serversMap[k] = v
+		}
+	}
 
-	data, err := json.MarshalIndent(mcpConfig, "", "  ")
-	if err == nil {
-		// Para Antigravity (.agents/mcp_config.json)
-		agentsDir := filepath.Join(targetDir, ".agents")
-		_ = os.MkdirAll(agentsDir, 0755)
-		_ = os.WriteFile(filepath.Join(agentsDir, "mcp_config.json"), data, 0644)
+	mergeAndWriteMCP := func(relPath string) {
+		dstPath := filepath.Join(targetDir, relPath)
+		_ = os.MkdirAll(filepath.Dir(dstPath), 0755)
 
-		// Para Claude Code (.mcp.json)
-		_ = os.WriteFile(filepath.Join(targetDir, ".mcp.json"), data, 0644)
+		var targetMap map[string]any
+		if origBytes, err := os.ReadFile(dstPath); err == nil {
+			manifest.OriginalFiles[relPath] = string(origBytes)
+			if err := json.Unmarshal(origBytes, &targetMap); err != nil {
+				targetMap = make(map[string]any)
+			}
+		} else {
+			manifest.CreatedFiles = append(manifest.CreatedFiles, relPath)
+			targetMap = make(map[string]any)
+		}
+
+		existingServers, _ := targetMap["mcpServers"].(map[string]any)
+		if existingServers == nil {
+			existingServers = make(map[string]any)
+		}
+		newServers := mcpConfig["mcpServers"].(map[string]any)
+		for k, v := range newServers {
+			existingServers[k] = v
+		}
+		targetMap["mcpServers"] = existingServers
+
+		mergedData, err := json.MarshalIndent(targetMap, "", "  ")
+		if err == nil {
+			_ = os.WriteFile(dstPath, mergedData, 0644)
+			manifest.ProjectedHash[relPath] = workspace.HashBytes(mergedData)
+		}
+	}
+
+	mergeAndWriteMCP(filepath.Join(".agents", "mcp_config.json"))
+	mergeAndWriteMCP(".mcp.json")
+
+	// Persistir el manifiesto en baseDir si fue suministrado
+	if len(baseDir) > 0 && baseDir[0] != "" {
+		_ = workspace.SaveManifest(baseDir[0], manifest)
 	}
 
 	return nil
