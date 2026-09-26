@@ -45,13 +45,13 @@ if [ -z "${REQUESTED_VERSION}" ]; then
     fi
 
     if [ -z "${LATEST_TAG}" ]; then
-        LATEST_TAG="v0.0.1"
+        LATEST_TAG="v0.0.2"
         printf "  ${BLUE}Nota:${NC} No se pudo consultar la API de GitHub, utilizando tag por defecto: ${LATEST_TAG}\n"
     fi
     VERSION="${LATEST_TAG#v}"
 else
+    LATEST_TAG="${REQUESTED_VERSION}"
     VERSION="${REQUESTED_VERSION#v}"
-    LATEST_TAG="v${VERSION}"
 fi
 
 printf "  Versión seleccionada: ${BOLD}${VERSION} (${LATEST_TAG})${NC}\n"
@@ -69,9 +69,19 @@ trap cleanup EXIT INT TERM
 
 printf "  Descargando ${ARCHIVE_NAME}...\n"
 if ! curl -fSL --progress-bar "${DOWNLOAD_URL}" -o "${TMP_DIR}/${ARCHIVE_NAME}"; then
-    printf "${RED}Error: No se pudo descargar el binario desde:${NC}\n  ${DOWNLOAD_URL}\n" >&2
-    printf "Verifica que el release exista y que el repositorio sea público.\n" >&2
-    exit 1
+    # Intento de reintento invirtiendo prefijo 'v' si el release usa convención alternativa
+    if [ "${LATEST_TAG#v}" = "${LATEST_TAG}" ]; then
+        ALT_TAG="v${LATEST_TAG}"
+    else
+        ALT_TAG="${LATEST_TAG#v}"
+    fi
+    ALT_URL="https://github.com/${REPO}/releases/download/${ALT_TAG}/${ARCHIVE_NAME}"
+    printf "  Reintentando descarga desde tag alternativo (${ALT_TAG})...\n"
+    if ! curl -fSL --progress-bar "${ALT_URL}" -o "${TMP_DIR}/${ARCHIVE_NAME}"; then
+        printf "${RED}Error: No se pudo descargar el binario desde:${NC}\n  ${DOWNLOAD_URL}\n  ${ALT_URL}\n" >&2
+        printf "Verifica que el release contenga los binarios compilados y que el repositorio sea público.\n" >&2
+        exit 1
+    fi
 fi
 
 printf "  Extrayendo archivos...\n"

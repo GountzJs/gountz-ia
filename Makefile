@@ -1,6 +1,6 @@
 BINARY_NAME=gz-ia
 BUILD_DIR=bin
-VERSION?=0.0.1
+VERSION?=0.0.2
 COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS=-ldflags "-X gz-ia/internal/version.Version=$(VERSION) -X gz-ia/internal/version.Commit=$(COMMIT) -X gz-ia/internal/version.Date=$(DATE)"

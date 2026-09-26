@@ -16,6 +16,7 @@ import (
 	"gz-ia/internal/features/session"
 	"gz-ia/internal/features/updater"
 	"gz-ia/internal/features/workspace"
+	"gz-ia/internal/version"
 )
 
 type mockSessionRunner struct {
@@ -98,8 +99,8 @@ func TestVersionCmd(t *testing.T) {
 	if !strings.Contains(out, "gz-ia") {
 		t.Errorf("salida de versión inesperada: %s", out)
 	}
-	if !strings.Contains(out, "v0.0.1") {
-		t.Errorf("salida de versión no contiene 'v0.0.1': %s", out)
+	if !strings.Contains(out, "v"+version.Version) {
+		t.Errorf("salida de versión no contiene 'v%s': %s", version.Version, out)
 	}
 }
 

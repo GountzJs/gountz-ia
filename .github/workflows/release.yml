@@ -4,12 +4,14 @@ on:
   push:
     tags:
       - 'v*'
+      - '[0-9]+.[0-9]+.[0-9]+*'
+      - 'tag/*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag de release (ej. v0.0.1)'
+        description: 'Tag de release (ej. v0.0.2 o 0.0.2)'
         required: true
-        default: 'v0.0.1'
+        default: 'v0.0.2'
 
 permissions:
   contents: write
@@ -49,8 +51,9 @@ jobs:
           else
             RAW_TAG="${{ github.ref_name }}"
           fi
-          # Remover prefijo 'v' para la versión canónica
-          VERSION="${RAW_TAG#v}"
+          # Remover prefijos para la versión canónica
+          CLEAN_VER="${RAW_TAG#tag/}"
+          VERSION="${CLEAN_VER#v}"
           COMMIT="$(git rev-parse --short HEAD)"
           DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           echo "tag=${RAW_TAG}" >> $GITHUB_OUTPUT
