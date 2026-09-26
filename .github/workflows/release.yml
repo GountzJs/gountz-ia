@@ -83,19 +83,19 @@ jobs:
       - name: Package Artifact
         run: |
           PKG_NAME="gz-ia_${{ steps.vars.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}"
-          mkdir -p packages
+          mkdir -p build-packages
 
           if [ "${{ matrix.archive }}" = "tar.gz" ]; then
-            tar -czvf "packages/${PKG_NAME}.tar.gz" -C dist .
+            tar -czvf "build-packages/${PKG_NAME}.tar.gz" -C dist .
           else
-            (cd dist && zip -r "../packages/${PKG_NAME}.zip" .)
+            (cd dist && zip -r "../build-packages/${PKG_NAME}.zip" .)
           fi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: package-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: packages/*
+          path: build-packages/*
 
   publish-release:
     name: Publish GitHub Release
@@ -115,7 +115,7 @@ jobs:
       - name: Generate Checksums
         run: |
           cd release-assets
-          sha256sum * > checksums.txt
+          sha256sum *.tar.gz *.zip > checksums.txt
           cat checksums.txt
 
       - name: Create GitHub Release
