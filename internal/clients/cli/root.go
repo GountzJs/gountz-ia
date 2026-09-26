@@ -32,6 +32,7 @@ de flujos agénticos modulares en Go.`,
 	cmd.AddCommand(newChatCmd())
 	cmd.AddCommand(newSessionCmd())
 	cmd.AddCommand(newProfileCmd())
+	cmd.AddCommand(newVaultCmd())
 	cmd.AddCommand(newUpdateCmd())
 
 	return cmd

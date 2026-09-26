@@ -11,6 +11,7 @@ import (
 	"gz-ia/internal/features/logger"
 	"gz-ia/internal/features/metrics"
 	"gz-ia/internal/features/profile"
+	"gz-ia/internal/features/vault"
 	"gz-ia/internal/features/workspace"
 )
 
@@ -18,9 +19,14 @@ type mockServiceRunner struct {
 	lastBinary string
 	lastArgs   []string
 	lastDir    string
+	lastEnv    []string
 	exitCode   int
 	err        error
 	onStartPID int
+}
+
+func (m *mockServiceRunner) SetEnv(env []string) {
+	m.lastEnv = env
 }
 
 func (m *mockServiceRunner) Run(ctx context.Context, binary string, args []string, dir string, onStart func(pid int)) (int, error) {
@@ -984,6 +990,40 @@ func TestService_StartChat_WithProfiles(t *testing.T) {
 	}
 	if len(rec.Profiles) != 1 || rec.Profiles[0] != "frontend" {
 		t.Errorf("profiles esperados ['frontend'], obtenidos %v", rec.Profiles)
+	}
+}
+
+func TestService_Vault_Integration(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+	runner := &mockServiceRunner{}
+	vSvc := vault.NewService(tmpDir)
+	ctx := context.Background()
+
+	_ = vSvc.Set(ctx, "MY_CUSTOM_SECRET", "secret-value-xyz")
+
+	svc := NewService(tmpDir, WithStore(store), WithRunner(runner), WithVault(vSvc))
+
+	err := svc.StartChat(ctx, StartChatRequest{
+		ID:         "vault_sess_1",
+		Provider:   "agy",
+		WorkingDir: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("StartChat con vault falló: %v", err)
+	}
+
+	foundSecret := false
+	for _, envStr := range runner.lastEnv {
+		if strings.HasPrefix(envStr, "MY_CUSTOM_SECRET=") {
+			foundSecret = true
+			if envStr != "MY_CUSTOM_SECRET=secret-value-xyz" {
+				t.Errorf("Valor inesperado inyectado: %s", envStr)
+			}
+		}
+	}
+	if !foundSecret {
+		t.Errorf("La variable MY_CUSTOM_SECRET no fue inyectada en el runner")
 	}
 }
 

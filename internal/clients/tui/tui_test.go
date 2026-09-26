@@ -12,6 +12,7 @@ import (
 	"gz-ia/internal/features/profile"
 	"gz-ia/internal/features/session"
 	"gz-ia/internal/features/updater"
+	"gz-ia/internal/features/vault"
 	"gz-ia/internal/features/workspace"
 )
 
@@ -376,6 +377,10 @@ func (m *mockTUISessionService) Prune(ctx context.Context) (*session.PruneResult
 	return &session.PruneResult{}, nil
 }
 
+func (m *mockTUISessionService) Vault() vault.Service {
+	return nil
+}
+
 func TestHandleSessionDetail_Read(t *testing.T) {
 	mockSvc := &mockTUISessionService{
 		readFunc: func(ctx context.Context, id string, statOnly bool) (string, error) {
@@ -633,6 +638,35 @@ func TestClient_WithProfile(t *testing.T) {
 	}
 	if client.getProfileService(tmpDir) != profSvc {
 		t.Errorf("getProfileService debió retornar profSvc inyectado")
+	}
+}
+
+func TestClient_WithVault(t *testing.T) {
+	tmpDir := t.TempDir()
+	vSvc := vault.NewService(tmpDir)
+	client := New(nil, nil).WithVault(vSvc)
+	if client.vaultService == nil {
+		t.Fatal("vaultService no inicializado")
+	}
+	if client.getVault(tmpDir) != vSvc {
+		t.Errorf("getVault debió retornar vSvc inyectado")
+	}
+}
+
+func TestClient_HandleVault_Back(t *testing.T) {
+	tmpDir := t.TempDir()
+	vSvc := vault.NewService(tmpDir)
+	var out bytes.Buffer
+
+	// Opción 4 corresponde a "[←] Volver al menú principal"
+	client := New(nil, nil).
+		WithVault(vSvc).
+		WithIO(strings.NewReader("4\n"), &out)
+
+	icons := GetIcons()
+	err := client.handleVault(icons)
+	if err != nil {
+		t.Fatalf("handleVault con salida 'back' falló: %v", err)
 	}
 }
 

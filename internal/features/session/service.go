@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gz-ia/internal/features/logger"
 	"gz-ia/internal/features/metrics"
 	"gz-ia/internal/features/profile"
+	"gz-ia/internal/features/vault"
 	"gz-ia/internal/features/workspace"
 )
 
@@ -57,6 +59,7 @@ type Service interface {
 	GetEvents(ctx context.Context, id string) ([]logger.Event, error)
 	WatchEvents(ctx context.Context, id string) (<-chan logger.Event, error)
 	Prune(ctx context.Context) (*PruneResult, error)
+	Vault() vault.Service
 }
 
 // sessionService implementa la interfaz Service orquestando los componentes centrales.
@@ -69,10 +72,18 @@ type sessionService struct {
 	metrics   metrics.Service
 	logger    logger.Service
 	profile   profile.Service
+	vault     vault.Service
 }
 
 // Option permite configurar dependencias opcionales en NewService.
 type Option func(*sessionService)
+
+// WithVault inyecta un servicio de vault personalizado.
+func WithVault(v vault.Service) Option {
+	return func(svc *sessionService) {
+		svc.vault = v
+	}
+}
 
 // WithStore inyecta un almacén de sesiones personalizado.
 func WithStore(s Store) Option {
@@ -167,7 +178,15 @@ func NewService(workDir string, opts ...Option) Service {
 		svc.profile = profile.NewService(profile.WithProjectDir(svc.workDir))
 	}
 
+	if svc.vault == nil {
+		svc.vault = vault.NewService(svc.workDir)
+	}
+
 	return svc
+}
+
+func (s *sessionService) Vault() vault.Service {
+	return s.vault
 }
 
 func (s *sessionService) StartChat(ctx context.Context, req StartChatRequest) error {
@@ -207,6 +226,44 @@ func (s *sessionService) StartChat(ctx context.Context, req StartChatRequest) er
 		perm = PermissionSupervised
 	}
 
+	// Validar variables de entorno requeridas y advertir al usuario si no existen
+	if s.vault != nil {
+		var requiredKeys []string
+		if s.profile != nil && len(req.Profiles) > 0 {
+			if composed, err := s.profile.Compose(ctx, req.Profiles); err == nil && composed != nil {
+				for k := range composed.Env {
+					requiredKeys = append(requiredKeys, k)
+				}
+			}
+		}
+
+		if prov == "claude" {
+			requiredKeys = append(requiredKeys, "ANTHROPIC_API_KEY")
+		} else if prov == "opencode" {
+			requiredKeys = append(requiredKeys, "OPENAI_API_KEY")
+		}
+
+		if len(requiredKeys) > 0 {
+			if missing, err := s.vault.ValidateRequired(ctx, requiredKeys); err == nil && len(missing) > 0 {
+				fmt.Fprintf(os.Stderr, "\n\033[1;33m⚠️  Aviso de Entorno:\033[0m Se detectaron variables no configuradas en el entorno ni en el vault:\n")
+				for _, k := range missing {
+					fmt.Fprintf(os.Stderr, "   • \033[1m%s\033[0m\n", k)
+				}
+				fmt.Fprintf(os.Stderr, "   Puedes configurarlas en el vault seguro con: \033[36mgz-ia vault set <VARIABLE>\033[0m\n\n")
+
+				if s.logger != nil {
+					_ = s.logger.Emit(ctx, &logger.Event{
+						SessionID: id,
+						AgentID:   "orchestrator",
+						Role:      "orchestrator",
+						Action:    fmt.Sprintf("Aviso: variables de entorno no encontradas (%s)", strings.Join(missing, ", ")),
+						Stage:     logger.StagePending,
+					})
+				}
+			}
+		}
+	}
+
 	if req.OnLaunch != nil {
 		isIsolated := false
 		if s.workspace != nil {
@@ -225,7 +282,11 @@ func (s *sessionService) StartChat(ctx context.Context, req StartChatRequest) er
 		Profiles:        req.Profiles,
 	}
 
-	sess := New(cfg, s.runner, s.store).WithWorkspace(s.workspace).WithLogger(s.logger).WithProfile(s.profile)
+	sess := New(cfg, s.runner, s.store).
+		WithWorkspace(s.workspace).
+		WithLogger(s.logger).
+		WithProfile(s.profile).
+		WithVault(s.vault)
 	return sess.Start(ctx)
 }
 

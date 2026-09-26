@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"gz-ia/internal/features/logger"
 	"gz-ia/internal/features/profile"
+	"gz-ia/internal/features/vault"
 	"gz-ia/internal/features/workspace"
 	"os"
 	"os/exec"
@@ -100,8 +101,20 @@ type Runner interface {
 	Run(ctx context.Context, binary string, args []string, dir string, onStart func(pid int)) (exitCode int, err error)
 }
 
+// EnvSetter define el método opcional para runners que admiten inyección de variables de entorno.
+type EnvSetter interface {
+	SetEnv(env []string)
+}
+
 // OSRunner ejecuta el proceso en el sistema operativo conectando la terminal interactiva (TTY).
-type OSRunner struct{}
+type OSRunner struct {
+	Env []string
+}
+
+// SetEnv asigna las variables de entorno formateadas ("CLAVE=VALOR") para el proceso.
+func (r *OSRunner) SetEnv(env []string) {
+	r.Env = env
+}
 
 // Run ejecuta agy conectando stdin, stdout y stderr e informando del PID cuando el proceso inicia.
 func (r *OSRunner) Run(ctx context.Context, binary string, args []string, dir string, onStart func(pid int)) (int, error) {
@@ -115,6 +128,9 @@ func (r *OSRunner) Run(ctx context.Context, binary string, args []string, dir st
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if len(r.Env) > 0 {
+		cmd.Env = r.Env
+	}
 
 	if err := cmd.Start(); err != nil {
 		return -1, err
@@ -146,6 +162,7 @@ type Session struct {
 	Workspace workspace.Provider
 	Logger    logger.Service
 	Profile   profile.Service
+	Vault     vault.Service
 }
 
 // New crea una nueva instancia de Session con runner y store inyectados.
@@ -189,6 +206,12 @@ func (s *Session) WithLogger(l logger.Service) *Session {
 // WithProfile permite inyectar un servicio de perfiles agénticos.
 func (s *Session) WithProfile(p profile.Service) *Session {
 	s.Profile = p
+	return s
+}
+
+// WithVault permite inyectar un servicio de vault para cargar variables de entorno seguras.
+func (s *Session) WithVault(v vault.Service) *Session {
+	s.Vault = v
 	return s
 }
 
@@ -283,6 +306,15 @@ func (s *Session) Start(ctx context.Context) error {
 	onStart := func(pid int) {
 		record.PID = pid
 		_ = s.Store.Save(record)
+	}
+
+	// Inyectar variables de entorno del Vault si está disponible
+	if s.Vault != nil {
+		if envSlice, err := s.Vault.LoadMergedEnvSlice(ctx); err == nil && len(envSlice) > 0 {
+			if setter, ok := s.Runner.(EnvSetter); ok {
+				setter.SetEnv(envSlice)
+			}
+		}
 	}
 
 	exitCode, runErr := s.Runner.Run(ctx, binary, args, ws.TargetDir, onStart)

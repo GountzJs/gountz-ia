@@ -30,6 +30,7 @@ En lugar de dejar que los agentes modifiquen directamente tu espacio de trabajo 
 - **TUI Interactiva + CLI-First:** Navega con una interfaz visual basada en Bubble Tea y formularios Huh (`gz-ia start`), o automatiza todo mediante subcomandos de terminal estándar con salida JSON.
 - **Perfiles Componibles (`-P`):** Modela roles de desarrollo (`frontend`, `backend`, `devops`, `security`) inyectando system prompts e instrucciones automáticas.
 - **Microkernel Orchy & Servidor MCP:** Servidor Model Context Protocol nativo por Stdio (JSON-RPC 2.0) con protección por Circuit Breaker (Honest Kernel).
+- **Vault Seguro de Secretos:** Almacén centralizado (`.harness/vault.json`, permisos `0600`, ignorado por Git) para API keys y variables de entorno, con detección automática de variables faltantes al iniciar sesiones.
 - **Observabilidad y Métricas:** Registro estructurado de eventos (`READ` $\to$ `PENDING` $\to$ `FINISH`) y auditoría de consumo de tokens y llamadas a herramientas.
 - **Actualizador Integrado:** Comprobación e instalación atómica de nuevas versiones directamente desde GitHub Releases con `gz-ia update`.
 
@@ -140,7 +141,22 @@ gz-ia session get <session_id> --no-commit
 gz-ia session get <session_id> --squash
 ```
 
-### 5. Observabilidad, Streaming y Métricas
+### 5. Vault de Secretos y Variables de Entorno
+
+Almacena de forma segura credenciales de API (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) sin exponerlas en Git:
+
+```bash
+# Listar variables configuradas y recomendadas (ofuscadas por seguridad)
+gz-ia vault list
+
+# Guardar una clave (solicita el valor con entrada oculta para no dejar historial)
+gz-ia vault set ANTHROPIC_API_KEY
+
+# Inspeccionar estado o revelar temporalmente
+gz-ia vault get ANTHROPIC_API_KEY --reveal
+```
+
+### 6. Observabilidad, Streaming y Métricas
 
 ```bash
 # Monitorear eventos en tiempo real mientras el agente trabaja
@@ -150,7 +166,7 @@ gz-ia session logs <session_id> -f
 gz-ia session metrics <session_id>
 ```
 
-### 6. Actualización Automática
+### 7. Actualización Automática
 
 Mantén tu instalación de `gz-ia` al día consultando GitHub Releases:
 

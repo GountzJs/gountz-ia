@@ -30,6 +30,7 @@ Guía detallada de sintaxis, argumentos, banderas y códigos de retorno de todos
 | [`gz-ia session log`](#gz-ia-session-log) | `<id>`<br>`-a, --action`<br>`-s, --stage`<br>`--status`<br>`--agent`<br>`-r, --role`<br>`--duration`<br>`--error`<br>`-d, --dir` | N/A | Registra un evento estructurado en `.events.jsonl`. |
 | [`gz-ia session logs`](#gz-ia-session-logs) | `<id>`<br>`-f, --follow`<br>`--json`<br>`-d, --dir` | N/A | Consulta histórica o transmisión en vivo de los eventos de una sesión. |
 | [`gz-ia session prune`](#gz-ia-session-prune) | `-d, --dir` | N/A | Reconcilia y elimina sesiones, ramas de Git y worktrees huérfanos. |
+| [`gz-ia vault`](#gz-ia-vault) | `list`, `set`, `get`, `delete`, `path`<br>`-d, --dir` | N/A | Gestiona secretos y variables de entorno centralizadas (`.harness/vault.json`). |
 | [`gz-ia update`](#gz-ia-update) | `-c, --check`<br>`-f, --force`<br>`--version`<br>`--install-dir` | N/A | Verifica e instala la última versión de `gz-ia` desde GitHub Releases. |
 | [`gz-ia version`](#gz-ia-version) | N/A | N/A | Muestra la versión, commit SHA y fecha de compilación. |
 
@@ -270,6 +271,31 @@ Reconcilia y elimina sesiones, ramas de Git y worktrees huérfanos que hayan que
 
 ```bash
 gz-ia session prune [-d, --dir <directorio>]
+```
+
+---
+
+### `gz-ia vault`
+
+Gestiona secretos y variables de entorno centralizadas para perfiles y agentes con almacenamiento seguro local en `.harness/vault.json` (permisos estrictos `0600` e ignorado automáticamente por Git).
+
+#### Subcomandos:
+
+```bash
+# Listar variables configuradas y recomendadas (con valores ofuscados)
+gz-ia vault list [-d, --dir <directorio>]
+
+# Guardar o actualizar una variable (solicita el secreto con entrada protegida)
+gz-ia vault set <VARIABLE> [VALOR] [-v, --value <val>]
+
+# Inspeccionar el estado y origen de una variable (ofuscada por defecto)
+gz-ia vault get <VARIABLE> [--reveal]
+
+# Eliminar una variable del vault
+gz-ia vault delete <VARIABLE>
+
+# Imprimir la ruta física del archivo vault.json
+gz-ia vault path
 ```
 
 ---

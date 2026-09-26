@@ -12,6 +12,7 @@ import (
 	"gz-ia/internal/features/profile"
 	"gz-ia/internal/features/session"
 	"gz-ia/internal/features/updater"
+	"gz-ia/internal/features/vault"
 	"gz-ia/internal/features/workspace"
 
 	"github.com/charmbracelet/huh"
@@ -27,6 +28,7 @@ type Client struct {
 	workspace      workspace.Provider
 	updaterService updater.Service
 	profileService profile.Service
+	vaultService   vault.Service
 	in             io.Reader
 	out            io.Writer
 }
@@ -81,6 +83,19 @@ func (c *Client) WithUpdater(u updater.Service) *Client {
 func (c *Client) WithProfile(p profile.Service) *Client {
 	c.profileService = p
 	return c
+}
+
+// WithVault permite inyectar una instancia del servicio de vault de secretos.
+func (c *Client) WithVault(v vault.Service) *Client {
+	c.vaultService = v
+	return c
+}
+
+func (c *Client) getVault(workDir string) vault.Service {
+	if c.vaultService != nil {
+		return c.vaultService
+	}
+	return vault.NewService(workDir)
 }
 
 func (c *Client) getProfileService(workDir string) profile.Service {
@@ -180,6 +195,7 @@ func (c *Client) Run() error {
 					Options(
 						huh.NewOption(fmt.Sprintf("%s  Iniciar nuevo chat con agente", icons.Rocket), "start_chat"),
 						huh.NewOption(fmt.Sprintf("%s  Sesiones activas e historial", icons.Worktree), "sessions"),
+						huh.NewOption(fmt.Sprintf("%s  Gestionar Vault de Secretos / Entorno", icons.Lock), "vault"),
 						huh.NewOption(fmt.Sprintf("%s  Actualizar gz-ia (update)", icons.Sync), "update"),
 						huh.NewOption(fmt.Sprintf("%s  Cerrar / Salir", icons.Exit), "exit"),
 					).
@@ -208,6 +224,8 @@ func (c *Client) Run() error {
 			_ = c.handleNewChat(icons)
 		case "sessions":
 			_ = c.handleSessions(icons)
+		case "vault":
+			_ = c.handleVault(icons)
 		case "update":
 			_ = c.handleUpdate(icons)
 		}
@@ -733,4 +751,170 @@ func (c *Client) handleUpdate(icons IconSet) error {
 	fmt.Fprintln(out, successMsg)
 
 	return nil
+}
+
+func (c *Client) resolveWorkDir() string {
+	if c.workspace != nil {
+		return c.workspace.ResolveProjectRoot(context.Background(), "")
+	}
+	cwd, _ := os.Getwd()
+	return cwd
+}
+
+// handleVault permite gestionar las variables de entorno y secretos del vault de forma segura e interactiva.
+func (c *Client) handleVault(icons IconSet) error {
+	workDir := c.resolveWorkDir()
+	svc := c.getVault(workDir)
+	ctx := context.Background()
+
+	for {
+		var action string
+		menuTitle := fmt.Sprintf("%s  Vault de Secretos y Variables de Entorno", icons.Lock)
+		menuDesc := fmt.Sprintf("%s Almacén seguro (.harness/vault.json, permisos 0600):", icons.Arrow)
+
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title(menuTitle).
+					Description(menuDesc).
+					Options(
+						huh.NewOption(fmt.Sprintf("%s  Ver variables y recomendaciones (ofuscadas)", icons.Sparkle), "list"),
+						huh.NewOption(fmt.Sprintf("%s  Configurar / Actualizar variable con valor secreto", icons.Bolt), "set"),
+						huh.NewOption(fmt.Sprintf("%s  Eliminar variable del Vault", icons.Cross), "delete"),
+						huh.NewOption("[←] Volver al menú principal", "back"),
+					).
+					Value(&action),
+			),
+		).WithTheme(CustomHuhTheme())
+
+		if c.in != nil {
+			form = form.WithInput(c.in).WithAccessible(true)
+		}
+		if c.out != nil {
+			form = form.WithOutput(c.out)
+		}
+
+		if err := form.Run(); err != nil || action == "back" {
+			return nil
+		}
+
+		switch action {
+		case "list":
+			statuses, err := svc.ListStatus(ctx, nil, "")
+			if err != nil {
+				fmt.Fprintln(c.getOut(), lipgloss.NewStyle().Foreground(ColorWarning).Render(fmt.Sprintf("Error: %v", err)))
+				continue
+			}
+
+			fmt.Fprintln(c.getOut())
+			header := fmt.Sprintf("%-24s  %-12s  %-24s  %-20s", "VARIABLE", "ESTADO", "VALOR ENMASCARADO", "RECOMENDADA PARA")
+			fmt.Fprintln(c.getOut(), lipgloss.NewStyle().Bold(true).Foreground(ColorSecondary).Render(header))
+			fmt.Fprintln(c.getOut(), lipgloss.NewStyle().Foreground(ColorSubtle).Render("─────────────────────────────────────────────────────────────────────────────────────────────"))
+
+			for _, s := range statuses {
+				statusBadge := lipgloss.NewStyle().Foreground(ColorMuted).Render("Faltante")
+				if s.InVault {
+					statusBadge = lipgloss.NewStyle().Foreground(ColorSuccess).Bold(true).Render("Vault [✓]")
+				} else if s.InSystem {
+					statusBadge = lipgloss.NewStyle().Foreground(ColorSecondary).Render("Sistema [$]")
+				}
+
+				masked := s.MaskedValue
+				if masked == "" {
+					masked = lipgloss.NewStyle().Foreground(ColorMuted).Render("(no configurada)")
+				}
+
+				rec := strings.Join(s.RecommendedFor, ", ")
+				if rec == "" {
+					rec = "-"
+				}
+				if len(rec) > 20 {
+					rec = rec[:17] + "..."
+				}
+
+				line := fmt.Sprintf("%-24s  %-12s  %-24s  %-20s", s.Key, statusBadge, masked, rec)
+				fmt.Fprintln(c.getOut(), line)
+			}
+			fmt.Fprintln(c.getOut())
+
+		case "set":
+			var key string
+			var val string
+
+			keyForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewInput().
+						Title("Nombre de la variable de entorno:").
+						Description("Ejemplo: ANTHROPIC_API_KEY, GITHUB_TOKEN, DATABASE_URL").
+						Value(&key),
+				),
+			).WithTheme(CustomHuhTheme())
+			if c.in != nil {
+				keyForm = keyForm.WithInput(c.in).WithAccessible(true)
+			}
+			if c.out != nil {
+				keyForm = keyForm.WithOutput(c.out)
+			}
+			if err := keyForm.Run(); err != nil || strings.TrimSpace(key) == "" {
+				continue
+			}
+
+			cleanKey := strings.TrimSpace(key)
+
+			valForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewInput().
+						Title(fmt.Sprintf("Valor secreto para '%s':", cleanKey)).
+						Description("La entrada se oculta en pantalla por seguridad").
+						EchoMode(huh.EchoModePassword).
+						Value(&val),
+				),
+			).WithTheme(CustomHuhTheme())
+			if c.in != nil {
+				valForm = valForm.WithInput(c.in).WithAccessible(true)
+			}
+			if c.out != nil {
+				valForm = valForm.WithOutput(c.out)
+			}
+			if err := valForm.Run(); err != nil {
+				continue
+			}
+
+			if err := svc.Set(ctx, cleanKey, val); err != nil {
+				fmt.Fprintln(c.getOut(), lipgloss.NewStyle().Foreground(ColorWarning).Render(fmt.Sprintf("Error guardando variable: %v", err)))
+			} else {
+				msg := lipgloss.NewStyle().Foreground(ColorSuccess).Bold(true).
+					Render(fmt.Sprintf("\n%s Variable '%s' guardada de forma segura en el Vault (%s)\n", icons.Check, cleanKey, svc.VaultPath()))
+				fmt.Fprintln(c.getOut(), msg)
+			}
+
+		case "delete":
+			var keyToDelete string
+			delForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewInput().
+						Title("Nombre de la variable a eliminar del Vault:").
+						Value(&keyToDelete),
+				),
+			).WithTheme(CustomHuhTheme())
+			if c.in != nil {
+				delForm = delForm.WithInput(c.in).WithAccessible(true)
+			}
+			if c.out != nil {
+				delForm = delForm.WithOutput(c.out)
+			}
+			if err := delForm.Run(); err != nil || strings.TrimSpace(keyToDelete) == "" {
+				continue
+			}
+
+			cleanKey := strings.TrimSpace(keyToDelete)
+			if err := svc.Delete(ctx, cleanKey); err != nil {
+				fmt.Fprintln(c.getOut(), lipgloss.NewStyle().Foreground(ColorWarning).Render(fmt.Sprintf("Error: %v", err)))
+			} else {
+				msg := lipgloss.NewStyle().Foreground(ColorSuccess).
+					Render(fmt.Sprintf("\n%s Variable '%s' eliminada del Vault.\n", icons.Check, cleanKey))
+				fmt.Fprintln(c.getOut(), msg)
+			}
+		}
+	}
 }

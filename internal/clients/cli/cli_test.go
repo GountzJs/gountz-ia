@@ -2283,4 +2283,95 @@ func TestProfileCmd_Lifecycle(t *testing.T) {
 	}
 }
 
+func TestVaultCmd_Lifecycle(t *testing.T) {
+	tmpDir := t.TempDir()
+	buf := new(bytes.Buffer)
+
+	// 1. Path
+	cmd := NewRootCmd()
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"vault", "path", "--dir", tmpDir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("vault path falló: %v", err)
+	}
+	if !strings.Contains(buf.String(), ".harness") || !strings.Contains(buf.String(), "vault.json") {
+		t.Errorf("vault path inesperado: %s", buf.String())
+	}
+
+	// 2. List (inicial con recomendaciones)
+	cmd = NewRootCmd()
+	buf.Reset()
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"vault", "list", "--dir", tmpDir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("vault list falló: %v", err)
+	}
+	if !strings.Contains(buf.String(), "ANTHROPIC_API_KEY") {
+		t.Errorf("vault list debió incluir recomendaciones: %s", buf.String())
+	}
+
+	// 3. Set
+	cmd = NewRootCmd()
+	buf.Reset()
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"vault", "set", "TEST_SECRET_KEY", "super-secret-password-12345", "--dir", tmpDir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("vault set falló: %v", err)
+	}
+	if !strings.Contains(buf.String(), "guardada exitosamente") {
+		t.Errorf("vault set salida inesperada: %s", buf.String())
+	}
+
+	// 4. Get (enmascarado por defecto)
+	cmd = NewRootCmd()
+	buf.Reset()
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"vault", "get", "TEST_SECRET_KEY", "--dir", tmpDir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("vault get falló: %v", err)
+	}
+	if strings.Contains(buf.String(), "super-secret-password-12345") {
+		t.Errorf("vault get NO debe exponer el secreto en texto plano sin --reveal: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "sup...45") {
+		t.Errorf("vault get debió mostrar valor enmascarado: %s", buf.String())
+	}
+
+	// 5. Get con --reveal
+	cmd = NewRootCmd()
+	buf.Reset()
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"vault", "get", "TEST_SECRET_KEY", "--reveal", "--dir", tmpDir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("vault get --reveal falló: %v", err)
+	}
+	if !strings.Contains(buf.String(), "super-secret-password-12345") {
+		t.Errorf("vault get --reveal debió revelar el valor: %s", buf.String())
+	}
+
+	// 6. Delete
+	cmd = NewRootCmd()
+	buf.Reset()
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"vault", "delete", "TEST_SECRET_KEY", "--dir", tmpDir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("vault delete falló: %v", err)
+	}
+	if !strings.Contains(buf.String(), "eliminada") {
+		t.Errorf("vault delete salida inesperada: %s", buf.String())
+	}
+
+	// 7. Get tras eliminación
+	cmd = NewRootCmd()
+	buf.Reset()
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"vault", "get", "TEST_SECRET_KEY", "--dir", tmpDir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("vault get tras delete falló: %v", err)
+	}
+	if !strings.Contains(buf.String(), "no encontrada") {
+		t.Errorf("se esperaba mensaje de no encontrada: %s", buf.String())
+	}
+}
+
 
