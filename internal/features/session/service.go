@@ -1,0 +1,504 @@
+package session
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"gz-ia/internal/features/logger"
+	"gz-ia/internal/features/metrics"
+	"gz-ia/internal/features/profile"
+	"gz-ia/internal/features/workspace"
+)
+
+// StartChatRequest encapsula los parámetros necesarios para iniciar una sesión de chat agéntica.
+type StartChatRequest struct {
+	ID              string
+	Provider        string
+	WorkingDir      string
+	InitialPrompt   string
+	PermissionLevel PermissionLevel
+	BinaryPath      string
+	Profiles        []string
+	OnLaunch        func(id string, isIsolated bool)
+}
+
+// MergeOptions define los parámetros para integrar cambios de un worktree aislado al repo principal.
+type MergeOptions struct {
+	Squash   bool
+	NoCommit bool
+}
+
+// PruneResult contiene las entidades huérfanas eliminadas tras la reconciliación.
+type PruneResult struct {
+	PrunedWorktrees []string `json:"pruned_worktrees"`
+	DeletedBranches []string `json:"deleted_branches"`
+}
+
+// Service define el contrato de casos de uso agnósticos de la UI para la gestión de sesiones.
+type Service interface {
+	StartChat(ctx context.Context, req StartChatRequest) error
+	List(ctx context.Context) ([]SessionRecord, error)
+	GetRecord(ctx context.Context, id string) (*SessionRecord, error)
+	GetSession(ctx context.Context, id string) (*SessionRecord, error)
+	Get(ctx context.Context, id string, opts MergeOptions) (*workspace.MergeResult, error)
+	Read(ctx context.Context, id string, statOnly bool) (string, error)
+	Kill(ctx context.Context, id string) error
+	Resume(ctx context.Context, id string) error
+	Delete(ctx context.Context, id string) error
+	Path(ctx context.Context, id string) (string, error)
+	Diff(ctx context.Context, id string, statOnly bool) (string, error)
+	Merge(ctx context.Context, id string, opts MergeOptions) (*workspace.MergeResult, error)
+	Metrics(ctx context.Context, id string) (*metrics.SessionMetrics, error)
+	LogEvent(ctx context.Context, evt *logger.Event) error
+	GetEvents(ctx context.Context, id string) ([]logger.Event, error)
+	WatchEvents(ctx context.Context, id string) (<-chan logger.Event, error)
+	Prune(ctx context.Context) (*PruneResult, error)
+}
+
+// sessionService implementa la interfaz Service orquestando los componentes centrales.
+type sessionService struct {
+	workDir   string
+	store     Store
+	runner    Runner
+	killer    ProcessKiller
+	workspace workspace.Provider
+	metrics   metrics.Service
+	logger    logger.Service
+	profile   profile.Service
+}
+
+// Option permite configurar dependencias opcionales en NewService.
+type Option func(*sessionService)
+
+// WithStore inyecta un almacén de sesiones personalizado.
+func WithStore(s Store) Option {
+	return func(svc *sessionService) {
+		svc.store = s
+	}
+}
+
+// WithRunner inyecta un ejecutor de procesos personalizado.
+func WithRunner(r Runner) Option {
+	return func(svc *sessionService) {
+		svc.runner = r
+	}
+}
+
+// WithKiller inyecta un terminador de procesos personalizado.
+func WithKiller(k ProcessKiller) Option {
+	return func(svc *sessionService) {
+		svc.killer = k
+	}
+}
+
+// WithWorkspace inyecta un proveedor de espacios de trabajo personalizado.
+func WithWorkspace(ws workspace.Provider) Option {
+	return func(svc *sessionService) {
+		svc.workspace = ws
+	}
+}
+
+// WithMetrics inyecta un servicio de métricas personalizado.
+func WithMetrics(m metrics.Service) Option {
+	return func(svc *sessionService) {
+		svc.metrics = m
+	}
+}
+
+// WithLogger inyecta un servicio de observabilidad y registro de eventos.
+func WithLogger(l logger.Service) Option {
+	return func(svc *sessionService) {
+		svc.logger = l
+	}
+}
+
+// WithProfile inyecta un servicio de perfiles agénticos personalizado.
+func WithProfile(p profile.Service) Option {
+	return func(svc *sessionService) {
+		svc.profile = p
+	}
+}
+
+// NewService crea un nuevo servicio de sesión con dependencias inyectadas o valores por defecto limpios.
+func NewService(workDir string, opts ...Option) Service {
+	svc := &sessionService{
+		workDir: workDir,
+	}
+
+	for _, opt := range opts {
+		opt(svc)
+	}
+
+	if svc.workspace == nil {
+		svc.workspace = workspace.NewDefaultProvider()
+	}
+
+	if svc.workDir == "" {
+		cwd, _ := os.Getwd()
+		svc.workDir = cwd
+	}
+	svc.workDir = svc.workspace.ResolveProjectRoot(context.Background(), svc.workDir)
+
+	if svc.store == nil {
+		svc.store = DefaultFileStore(svc.workDir)
+	}
+
+	if svc.runner == nil {
+		svc.runner = &OSRunner{}
+	}
+
+	if svc.killer == nil {
+		svc.killer = &OSProcessKiller{}
+	}
+
+	if svc.metrics == nil {
+		svc.metrics = metrics.NewService()
+	}
+
+	if svc.logger == nil {
+		svc.logger = logger.NewService(svc.workDir)
+	}
+
+	if svc.profile == nil {
+		svc.profile = profile.NewService(profile.WithProjectDir(svc.workDir))
+	}
+
+	return svc
+}
+
+func (s *sessionService) StartChat(ctx context.Context, req StartChatRequest) error {
+	targetDir := req.WorkingDir
+	if targetDir == "" {
+		targetDir = s.workDir
+	}
+	if s.workspace != nil {
+		targetDir = s.workspace.ResolveProjectRoot(ctx, targetDir)
+	}
+
+	id := req.ID
+	if id == "" {
+		id = GenerateID()
+	}
+
+	prov := req.Provider
+	if prov == "" {
+		if first := FirstAvailableDriver(); first != nil {
+			prov = first.ID()
+		} else {
+			prov = "agy"
+		}
+	}
+
+	bin := req.BinaryPath
+	if bin == "" {
+		if d, err := GetDriver(prov); err == nil {
+			bin = d.BinaryName()
+		} else {
+			bin = "agy"
+		}
+	}
+
+	perm := req.PermissionLevel
+	if perm == "" {
+		perm = PermissionSupervised
+	}
+
+	if req.OnLaunch != nil {
+		isIsolated := false
+		if s.workspace != nil {
+			isIsolated = s.workspace.IsGitAvailable(ctx, targetDir)
+		}
+		req.OnLaunch(id, isIsolated)
+	}
+
+	cfg := Config{
+		ID:              id,
+		Provider:        prov,
+		WorkingDir:      targetDir,
+		InitialPrompt:   req.InitialPrompt,
+		PermissionLevel: perm,
+		BinaryPath:      bin,
+		Profiles:        req.Profiles,
+	}
+
+	sess := New(cfg, s.runner, s.store).WithWorkspace(s.workspace).WithLogger(s.logger).WithProfile(s.profile)
+	return sess.Start(ctx)
+}
+
+func (s *sessionService) List(ctx context.Context) ([]SessionRecord, error) {
+	if s.store == nil {
+		return nil, errors.New("store no inicializado")
+	}
+	return s.store.List()
+}
+
+func (s *sessionService) GetRecord(ctx context.Context, id string) (*SessionRecord, error) {
+	if s.store == nil {
+		return nil, errors.New("store no inicializado")
+	}
+	return s.store.Get(id)
+}
+
+func (s *sessionService) GetSession(ctx context.Context, id string) (*SessionRecord, error) {
+	return s.GetRecord(ctx, id)
+}
+
+func (s *sessionService) Kill(ctx context.Context, id string) error {
+	if s.store == nil {
+		return errors.New("store no inicializado")
+	}
+
+	record, err := s.store.Get(id)
+	if err != nil {
+		return err
+	}
+
+	if record.Status != StatusRunning {
+		return fmt.Errorf("la sesión '%s' no está activa (estado actual: %s)", id, record.Status)
+	}
+
+	if record.PID > 0 {
+		if err := s.killer.Kill(record.PID); err != nil {
+			return fmt.Errorf("error al terminar proceso %d de la sesión '%s': %w", record.PID, id, err)
+		}
+	}
+
+	now := time.Now()
+	record.Status = StatusKilled
+	record.FinishedAt = &now
+	record.DurationMs = now.Sub(record.StartedAt).Milliseconds()
+
+	if err := s.store.Save(record); err != nil {
+		return fmt.Errorf("error al actualizar estado de la sesión '%s': %w", id, err)
+	}
+
+	if s.logger != nil {
+		dur := record.DurationMs
+		st := logger.StatusFailed
+		_ = s.logger.Emit(ctx, &logger.Event{
+			SessionID:  id,
+			AgentID:    "orchestrator",
+			Role:       "orchestrator",
+			Action:     fmt.Sprintf("Sesión finalizada manualmente (kill PID %d)", record.PID),
+			Stage:      logger.StageFinish,
+			Status:     &st,
+			DurationMs: &dur,
+		})
+	}
+
+	return nil
+}
+
+func (s *sessionService) Resume(ctx context.Context, id string) error {
+	if s.store == nil {
+		return errors.New("store no inicializado")
+	}
+
+	record, err := s.store.Get(id)
+	if err != nil {
+		return err
+	}
+
+	if record.Status == StatusRunning {
+		return fmt.Errorf("la sesión '%s' ya se encuentra en ejecución (PID %d)", id, record.PID)
+	}
+
+	prov := record.Provider
+	if prov == "" {
+		prov = "agy"
+	}
+	bin := prov
+	if d, err := GetDriver(prov); err == nil {
+		bin = d.BinaryName()
+	}
+
+	cfg := Config{
+		ID:              record.ID,
+		Provider:        prov,
+		WorkingDir:      record.WorkingDir,
+		PermissionLevel: record.PermissionLevel,
+		Resume:          true,
+		BinaryPath:      bin,
+		IsIsolated:      record.IsIsolated,
+		WorktreeDir:     record.WorktreeDir,
+		BranchName:      record.BranchName,
+		Profiles:        record.Profiles,
+	}
+
+	sess := New(cfg, s.runner, s.store).WithWorkspace(s.workspace).WithLogger(s.logger).WithProfile(s.profile)
+	return sess.Start(ctx)
+}
+
+func (s *sessionService) Delete(ctx context.Context, id string) error {
+	if s.store == nil {
+		return errors.New("store no inicializado")
+	}
+
+	record, err := s.store.Get(id)
+	if err != nil {
+		return err
+	}
+
+	if record.Status == StatusRunning && record.PID > 0 {
+		_ = s.killer.Kill(record.PID)
+	}
+
+	if record.WorktreeDir != "" {
+		ws := s.workspace
+		if ws == nil {
+			ws = workspace.NewDefaultProvider()
+		}
+		_ = ws.CleanupWorktree(ctx, record.WorkingDir, record.WorktreeDir, record.BranchName)
+	}
+
+	return s.store.Delete(id)
+}
+
+func (s *sessionService) Path(ctx context.Context, id string) (string, error) {
+	if s.store == nil {
+		return "", errors.New("store no inicializado")
+	}
+
+	record, err := s.store.Get(id)
+	if err != nil {
+		return "", err
+	}
+
+	targetPath := record.WorkingDir
+	if record.IsIsolated && record.WorktreeDir != "" {
+		targetPath = record.WorktreeDir
+	}
+
+	absPath, err := filepath.Abs(targetPath)
+	if err == nil {
+		targetPath = absPath
+	}
+	return filepath.Clean(targetPath), nil
+}
+
+func (s *sessionService) Diff(ctx context.Context, id string, statOnly bool) (string, error) {
+	if s.store == nil {
+		return "", errors.New("store no inicializado")
+	}
+
+	record, err := s.store.Get(id)
+	if err != nil {
+		return "", err
+	}
+
+	if !record.IsIsolated {
+		return "La sesión se ejecutó en modo directo y no cuenta con diff aislado.", nil
+	}
+
+	ws := s.workspace
+	if ws == nil {
+		ws = workspace.NewDefaultProvider()
+	}
+
+	return ws.DiffWorktree(ctx, record.WorkingDir, record.WorktreeDir, record.BranchName, statOnly)
+}
+
+func (s *sessionService) Merge(ctx context.Context, id string, opts MergeOptions) (*workspace.MergeResult, error) {
+	if s.store == nil {
+		return nil, errors.New("store no inicializado")
+	}
+
+	record, err := s.store.Get(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if !record.IsIsolated {
+		return nil, fmt.Errorf("la sesión '%s' se ejecutó en modo directo y no cuenta con una rama de worktree aislada para fusionar", id)
+	}
+
+	branchName := record.BranchName
+	if branchName == "" {
+		branchName = "harness/" + record.ID
+	}
+
+	ws := s.workspace
+	if ws == nil {
+		ws = workspace.NewDefaultProvider()
+	}
+
+	return ws.MergeWorktree(ctx, record.ID, record.WorkingDir, record.WorktreeDir, branchName, opts.Squash, opts.NoCommit)
+}
+
+func (s *sessionService) Read(ctx context.Context, id string, statOnly bool) (string, error) {
+	return s.Diff(ctx, id, statOnly)
+}
+
+func (s *sessionService) Get(ctx context.Context, id string, opts MergeOptions) (*workspace.MergeResult, error) {
+	return s.Merge(ctx, id, opts)
+}
+
+func (s *sessionService) Metrics(ctx context.Context, id string) (*metrics.SessionMetrics, error) {
+	if s.store == nil {
+		return nil, errors.New("store no inicializado")
+	}
+
+	if s.metrics == nil {
+		s.metrics = metrics.NewService()
+	}
+
+	record, err := s.store.Get(id)
+	if err != nil {
+		return nil, err
+	}
+
+	targetDir := record.WorkingDir
+	if record.IsIsolated && record.WorktreeDir != "" {
+		targetDir = record.WorktreeDir
+	}
+
+	return s.metrics.GetMetrics(ctx, id, targetDir)
+}
+
+func (s *sessionService) LogEvent(ctx context.Context, evt *logger.Event) error {
+	if s.logger == nil {
+		return errors.New("logger no inicializado")
+	}
+	return s.logger.Emit(ctx, evt)
+}
+
+func (s *sessionService) GetEvents(ctx context.Context, id string) ([]logger.Event, error) {
+	if s.logger == nil {
+		return nil, errors.New("logger no inicializado")
+	}
+	return s.logger.GetEvents(ctx, id)
+}
+
+func (s *sessionService) WatchEvents(ctx context.Context, id string) (<-chan logger.Event, error) {
+	if s.logger == nil {
+		return nil, errors.New("logger no inicializado")
+	}
+	return s.logger.Watch(ctx, id)
+}
+
+func (s *sessionService) Prune(ctx context.Context) (*PruneResult, error) {
+	records, err := s.store.List()
+	if err != nil {
+		return nil, fmt.Errorf("error al listar sesiones para reconciliación: %w", err)
+	}
+
+	var activeIDs []string
+	for _, rec := range records {
+		activeIDs = append(activeIDs, rec.ID)
+	}
+
+	report, err := s.workspace.Prune(ctx, s.workDir, activeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("error al podar worktrees y ramas de Git: %w", err)
+	}
+
+	return &PruneResult{
+		PrunedWorktrees: report.PrunedWorktrees,
+		DeletedBranches: report.DeletedBranches,
+	}, nil
+}
+

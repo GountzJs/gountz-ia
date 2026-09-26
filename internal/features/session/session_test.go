@@ -1,0 +1,495 @@
+package session
+
+import (
+	"context"
+	"errors"
+	"gz-ia/internal/features/workspace"
+	"os"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+type mockRunner struct {
+	lastBinary string
+	lastArgs   []string
+	lastDir    string
+	returnErr  error
+	mockPID    int
+}
+
+func (m *mockRunner) Run(ctx context.Context, binary string, args []string, dir string, onStart func(pid int)) (int, error) {
+	m.lastBinary = binary
+	m.lastArgs = args
+	m.lastDir = dir
+	pid := m.mockPID
+	if pid == 0 {
+		pid = 1234
+	}
+	if onStart != nil {
+		onStart(pid)
+	}
+	exitCode := 0
+	if m.returnErr != nil {
+		exitCode = 1
+	}
+	return exitCode, m.returnErr
+}
+
+func TestDefaultConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.BinaryPath != "agy" {
+		t.Errorf("BinaryPath esperado 'agy', obtenido '%s'", cfg.BinaryPath)
+	}
+	if cfg.WorkingDir == "" {
+		t.Error("WorkingDir no debe estar vacío")
+	}
+	if cfg.PermissionLevel != PermissionSupervised {
+		t.Errorf("PermissionLevel esperado '%s', obtenido '%s'", PermissionSupervised, cfg.PermissionLevel)
+	}
+	if cfg.InitialPrompt != "" {
+		t.Errorf("InitialPrompt esperado vacío, obtenido '%s'", cfg.InitialPrompt)
+	}
+	if cfg.Provider != "agy" {
+		t.Errorf("Provider esperado 'agy', obtenido '%s'", cfg.Provider)
+	}
+	if len(cfg.ID) != 8 {
+		t.Errorf("ID esperado de 8 caracteres, obtenido '%s'", cfg.ID)
+	}
+}
+
+func TestResolveBinaryPath(t *testing.T) {
+	path, err := ResolveBinaryPath("git")
+	if err != nil {
+		t.Fatalf("ResolveBinaryPath('git') falló: %v", err)
+	}
+	if !strings.Contains(path, "git") {
+		t.Errorf("ruta resuelta inesperada: %s", path)
+	}
+
+	_, err = ResolveBinaryPath("binario_inexistente_12345")
+	if err == nil {
+		t.Fatal("se esperaba error con binario inexistente y se obtuvo nil")
+	}
+}
+
+func TestBuildArgs(t *testing.T) {
+	tests := []struct {
+		name       string
+		cfg        Config
+		wantArgs   []string
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name: "Nivel Supervised por defecto (sin prompt)",
+			cfg: Config{
+				WorkingDir:      "/test/dir",
+				PermissionLevel: PermissionSupervised,
+			},
+			wantArgs: nil,
+			wantErr:  false,
+		},
+		{
+			name: "Nivel ReadOnly (solo lectura / modo plan)",
+			cfg: Config{
+				WorkingDir:      "/test/dir",
+				PermissionLevel: PermissionReadOnly,
+			},
+			wantArgs: []string{"--mode", "plan"},
+			wantErr:  false,
+		},
+		{
+			name: "Nivel Autonomous (auto-aprobación en workspace)",
+			cfg: Config{
+				WorkingDir:      "/test/dir",
+				PermissionLevel: PermissionAutonomous,
+			},
+			wantArgs: []string{"--dangerously-skip-permissions"},
+			wantErr:  false,
+		},
+		{
+			name: "Nivel ReadOnly con InitialPrompt",
+			cfg: Config{
+				WorkingDir:      "/test/dir",
+				PermissionLevel: PermissionReadOnly,
+				InitialPrompt:   "auditar seguridad",
+			},
+			wantArgs: []string{"--mode", "plan", "-i", "auditar seguridad"},
+			wantErr:  false,
+		},
+		{
+			name: "Nivel Autonomous con InitialPrompt",
+			cfg: Config{
+				WorkingDir:      "/test/dir",
+				PermissionLevel: PermissionAutonomous,
+				InitialPrompt:   "generar componente",
+			},
+			wantArgs: []string{"--dangerously-skip-permissions", "-i", "generar componente"},
+			wantErr:  false,
+		},
+		{
+			name: "Reanudación de sesión con Resume: true",
+			cfg: Config{
+				WorkingDir:      "/test/dir",
+				PermissionLevel: PermissionSupervised,
+				Resume:          true,
+			},
+			wantArgs: []string{"--continue"},
+			wantErr:  false,
+		},
+		{
+			name: "Error cuando WorkingDir está vacío",
+			cfg: Config{
+				WorkingDir: "",
+			},
+			wantErr:    true,
+			errContain: "working directory no puede estar vacío",
+		},
+		{
+			name: "Error con nivel de permiso desconocido",
+			cfg: Config{
+				WorkingDir:      "/test/dir",
+				PermissionLevel: "invalido",
+			},
+			wantErr:    true,
+			errContain: "nivel de permiso desconocido",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BuildArgs(tt.cfg)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("se esperaba error y se obtuvo nil")
+				}
+				if !strings.Contains(err.Error(), tt.errContain) {
+					t.Errorf("error inesperado: '%s' no contiene '%s'", err.Error(), tt.errContain)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("error inesperado: %v", err)
+			}
+
+			if len(got) == 0 && len(tt.wantArgs) == 0 {
+				return
+			}
+
+			if !reflect.DeepEqual(got, tt.wantArgs) {
+				t.Errorf("BuildArgs() = %v, esperado %v", got, tt.wantArgs)
+			}
+		})
+	}
+}
+
+func TestSessionStart_Success(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "session-start-test-*")
+	defer os.RemoveAll(tmpDir)
+
+	store := NewFileStore(tmpDir)
+	mock := &mockRunner{mockPID: 4321}
+	cfg := Config{
+		ID:              "test0001",
+		WorkingDir:      tmpDir,
+		PermissionLevel: PermissionAutonomous,
+		InitialPrompt:   "Hola agente",
+		BinaryPath:      "agy",
+	}
+
+	sess := New(cfg, mock, store)
+	err := sess.Start(context.Background())
+	if err != nil {
+		t.Fatalf("Start() retornó error inesperado: %v", err)
+	}
+
+	if mock.lastBinary != "agy" {
+		t.Errorf("binario ejecutado '%s', esperado 'agy'", mock.lastBinary)
+	}
+	if mock.lastDir != tmpDir {
+		t.Errorf("directorio ejecutado '%s', esperado '%s'", mock.lastDir, tmpDir)
+	}
+
+	expectedArgs := []string{"--dangerously-skip-permissions", "-i", "Hola agente"}
+	if !reflect.DeepEqual(mock.lastArgs, expectedArgs) {
+		t.Errorf("argumentos pasados %v, esperado %v", mock.lastArgs, expectedArgs)
+	}
+
+	// Verificar registro en Store
+	rec, err := store.Get("test0001")
+	if err != nil {
+		t.Fatalf("Get('test0001') falló: %v", err)
+	}
+	if rec.Status != StatusCompleted {
+		t.Errorf("estado esperado '%s', obtenido '%s'", StatusCompleted, rec.Status)
+	}
+	if rec.PID != 4321 {
+		t.Errorf("PID esperado 4321, obtenido %d", rec.PID)
+	}
+	if rec.ExitCode != 0 {
+		t.Errorf("ExitCode esperado 0, obtenido %d", rec.ExitCode)
+	}
+	if rec.FinishedAt == nil {
+		t.Error("FinishedAt no debe ser nil")
+	}
+}
+
+func TestSessionStart_RunnerError(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "session-err-test-*")
+	defer os.RemoveAll(tmpDir)
+
+	store := NewFileStore(tmpDir)
+	expectedErr := errors.New("falla al spawnear proceso")
+	mock := &mockRunner{returnErr: expectedErr}
+	cfg := Config{
+		ID:         "err0001",
+		WorkingDir: tmpDir,
+	}
+
+	sess := New(cfg, mock, store)
+	err := sess.Start(context.Background())
+	if err == nil {
+		t.Fatal("se esperaba error y se obtuvo nil")
+	}
+	if !errors.Is(err, expectedErr) {
+		t.Errorf("error obtenido '%v', esperado '%v'", err, expectedErr)
+	}
+
+	rec, _ := store.Get("err0001")
+	if rec.Status != StatusFailed {
+		t.Errorf("estado esperado '%s', obtenido '%s'", StatusFailed, rec.Status)
+	}
+	if rec.ExitCode != 1 {
+		t.Errorf("ExitCode esperado 1, obtenido %d", rec.ExitCode)
+	}
+}
+
+func TestSessionStart_InvalidConfig(t *testing.T) {
+	mock := &mockRunner{}
+	cfg := Config{
+		WorkingDir: "", // Inválido
+	}
+
+	sess := New(cfg, mock)
+	err := sess.Start(context.Background())
+	if err == nil {
+		t.Fatal("se esperaba error con WorkingDir vacío")
+	}
+}
+
+type mockWorkspaceProvider struct {
+	isGitAvail bool
+	prepareWS  *workspace.Workspace
+	prepareErr error
+	cleanedWS  *workspace.Workspace
+	cleanErr   error
+}
+
+func (m *mockWorkspaceProvider) IsGitAvailable(ctx context.Context, dir string) bool {
+	return m.isGitAvail
+}
+
+func (m *mockWorkspaceProvider) ResolveProjectRoot(ctx context.Context, dir string) string {
+	return dir
+}
+
+func (m *mockWorkspaceProvider) Prepare(ctx context.Context, sessionID string, baseDir string) (*workspace.Workspace, error) {
+	if m.prepareErr != nil {
+		return nil, m.prepareErr
+	}
+	if m.prepareWS != nil {
+		return m.prepareWS, nil
+	}
+	return &workspace.Workspace{
+		WorkingDir:  baseDir,
+		TargetDir:   baseDir,
+		IsIsolated:  false,
+		WorktreeDir: "",
+		BranchName:  "",
+	}, nil
+}
+
+func (m *mockWorkspaceProvider) Cleanup(ctx context.Context, ws *workspace.Workspace) error {
+	m.cleanedWS = ws
+	return m.cleanErr
+}
+
+func (m *mockWorkspaceProvider) CleanupWorktree(ctx context.Context, baseDir string, worktreeDir string, branchName string) error {
+	m.cleanedWS = &workspace.Workspace{
+		WorkingDir:  baseDir,
+		WorktreeDir: worktreeDir,
+		BranchName:  branchName,
+		IsIsolated:  true,
+	}
+	return m.cleanErr
+}
+
+func (m *mockWorkspaceProvider) DiffWorktree(ctx context.Context, baseDir string, worktreeDir string, branchName string, statOnly bool) (string, error) {
+	return "", nil
+}
+
+func (m *mockWorkspaceProvider) MergeWorktree(ctx context.Context, sessionID string, baseDir string, worktreeDir string, branchName string, squash bool, noCommit bool) (*workspace.MergeResult, error) {
+	return &workspace.MergeResult{AlreadyUpToDate: true}, nil
+}
+
+func (m *mockWorkspaceProvider) Prune(ctx context.Context, baseDir string, activeSessionIDs []string) (*workspace.PruneReport, error) {
+	return &workspace.PruneReport{}, nil
+}
+
+func TestSessionStart_WithGitWorktree(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "session-wt-test-*")
+	defer os.RemoveAll(tmpDir)
+
+	store := NewFileStore(tmpDir)
+	mockRun := &mockRunner{mockPID: 6789}
+	wtDir := tmpDir + "/.harness/worktrees/wt_sess_1"
+
+	wsMock := &mockWorkspaceProvider{
+		isGitAvail: true,
+		prepareWS: &workspace.Workspace{
+			WorkingDir:  tmpDir,
+			TargetDir:   wtDir,
+			IsIsolated:  true,
+			WorktreeDir: wtDir,
+			BranchName:  "harness/wt_sess_1",
+		},
+	}
+
+	cfg := Config{
+		ID:              "wt_sess_1",
+		WorkingDir:      tmpDir,
+		PermissionLevel: PermissionSupervised,
+		BinaryPath:      "agy",
+	}
+
+	sess := New(cfg, mockRun, store).WithWorkspace(wsMock)
+	err := sess.Start(context.Background())
+	if err != nil {
+		t.Fatalf("Start con worktree falló: %v", err)
+	}
+
+	// Comprobar que el runner se ejecutó dentro del Worktree aislado
+	if mockRun.lastDir != wtDir {
+		t.Errorf("Runner debió ejecutarse en el WorktreeDir '%s', se ejecutó en '%s'", wtDir, mockRun.lastDir)
+	}
+
+	// Comprobar metadata en SessionRecord
+	rec, err := store.Get("wt_sess_1")
+	if err != nil {
+		t.Fatalf("error obteniendo sesión: %v", err)
+	}
+	if !rec.IsIsolated {
+		t.Error("rec.IsIsolated debió ser true")
+	}
+	if rec.WorktreeDir != wtDir {
+		t.Errorf("rec.WorktreeDir esperado '%s', obtenido '%s'", wtDir, rec.WorktreeDir)
+	}
+	if rec.BranchName != "harness/wt_sess_1" {
+		t.Errorf("rec.BranchName esperado 'harness/wt_sess_1', obtenido '%s'", rec.BranchName)
+	}
+	if rec.Status != StatusCompleted {
+		t.Errorf("rec.Status esperado '%s', obtenido '%s'", StatusCompleted, rec.Status)
+	}
+}
+
+func TestSessionStart_FallbackDirect(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "session-fallback-test-*")
+	defer os.RemoveAll(tmpDir)
+
+	store := NewFileStore(tmpDir)
+	mockRun := &mockRunner{mockPID: 3333}
+
+	wsMock := &mockWorkspaceProvider{
+		isGitAvail: false,
+		prepareWS: &workspace.Workspace{
+			WorkingDir:  tmpDir,
+			TargetDir:   tmpDir,
+			IsIsolated:  false,
+			WorktreeDir: "",
+			BranchName:  "",
+		},
+	}
+
+	cfg := Config{
+		ID:              "fallback_sess",
+		WorkingDir:      tmpDir,
+		PermissionLevel: PermissionReadOnly,
+	}
+
+	sess := New(cfg, mockRun, store).WithWorkspace(wsMock)
+	err := sess.Start(context.Background())
+	if err != nil {
+		t.Fatalf("Start con fallback falló: %v", err)
+	}
+
+	if mockRun.lastDir != tmpDir {
+		t.Errorf("Runner debió ejecutarse en tmpDir directo, obtenido: %s", mockRun.lastDir)
+	}
+
+	rec, _ := store.Get("fallback_sess")
+	if rec.IsIsolated {
+		t.Error("rec.IsIsolated debió ser false")
+	}
+	if rec.WorktreeDir != "" {
+		t.Errorf("rec.WorktreeDir debió ser vacío, obtenido: %s", rec.WorktreeDir)
+	}
+}
+
+func TestSessionStart_ResumeIsolated(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "session-resume-iso-*")
+	defer os.RemoveAll(tmpDir)
+
+	store := NewFileStore(tmpDir)
+	mockRun := &mockRunner{}
+	wtDir := tmpDir + "/.harness/worktrees/resume_iso"
+
+	wsMock := &mockWorkspaceProvider{isGitAvail: true}
+
+	cfg := Config{
+		ID:              "resume_iso",
+		WorkingDir:      tmpDir,
+		PermissionLevel: PermissionAutonomous,
+		Resume:          true,
+		IsIsolated:      true,
+		WorktreeDir:     wtDir,
+		BranchName:      "harness/resume_iso",
+	}
+
+	sess := New(cfg, mockRun, store).WithWorkspace(wsMock)
+	err := sess.Start(context.Background())
+	if err != nil {
+		t.Fatalf("Start() con reanudación aislada falló: %v", err)
+	}
+
+	if mockRun.lastDir != wtDir {
+		t.Errorf("Runner debió reutilizar el worktree existente '%s', ejecutado en '%s'", wtDir, mockRun.lastDir)
+	}
+}
+
+func TestSessionStart_WorkspacePrepError(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "session-prep-err-*")
+	defer os.RemoveAll(tmpDir)
+
+	store := NewFileStore(tmpDir)
+	mockRun := &mockRunner{}
+	wsMock := &mockWorkspaceProvider{
+		prepareErr: errors.New("falla al inicializar worktree git"),
+	}
+
+	cfg := Config{
+		ID:         "prep_err_sess",
+		WorkingDir: tmpDir,
+	}
+
+	sess := New(cfg, mockRun, store).WithWorkspace(wsMock)
+	err := sess.Start(context.Background())
+	if err == nil {
+		t.Fatal("Start debió fallar cuando Prepare del workspace falla")
+	}
+	if !strings.Contains(err.Error(), "error al preparar espacio de trabajo") {
+		t.Errorf("mensaje de error inesperado: %v", err)
+	}
+}
+

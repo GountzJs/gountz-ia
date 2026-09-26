@@ -1,0 +1,12 @@
+# Binaries
+bin/
+
+# Harness sessions and local data
+.harness/
+*.tmp
+
+# Documentation (VitePress)
+docs/node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+docs/
