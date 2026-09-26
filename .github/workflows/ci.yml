@@ -2,9 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main]
+
+permissions:
+  contents: read
+  deployments: write
+  pull-requests: write
 
 jobs:
   test:
@@ -40,3 +45,15 @@ jobs:
 
       - name: Build Documentation (VitePress)
         run: cd docs && npm run docs:build
+
+      - name: Deploy Documentation to Cloudflare Pages
+        if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'pull_request' && env.HAS_CF_TOKEN == 'true')
+        env:
+          HAS_CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: ${{ secrets.CLOUDFLARE_PROJECT_NAME || vars.CLOUDFLARE_PROJECT_NAME || 'gz-ia' }}
+          directory: docs/.vitepress/dist
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
