@@ -175,8 +175,9 @@ func (l *Loader) LoadToolkit(id string) (*Toolkit, error) {
 	}
 	if l.projectDir != "" {
 		candidatePaths = append(candidatePaths,
-			struct{ path, scope string }{path: filepath.Join(l.projectDir, ".harness", "toolkits", cleanID), scope: "project"},
+			struct{ path, scope string }{path: filepath.Join(l.projectDir, ".gz-ia", "toolkits", cleanID), scope: "project"},
 			struct{ path, scope string }{path: filepath.Join(l.projectDir, "toolkits", cleanID), scope: "project"},
+			struct{ path, scope string }{path: filepath.Join(l.projectDir, ".harness", "toolkits", cleanID), scope: "project"},
 		)
 	}
 	candidatePaths = append(candidatePaths,
@@ -191,7 +192,7 @@ func (l *Loader) LoadToolkit(id string) (*Toolkit, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("toolkit '%s' no encontrado en el proyecto (%s/.harness/toolkits) ni globalmente (%s/toolkits)", cleanID, l.projectDir, l.toolingDir)
+	return nil, fmt.Errorf("toolkit '%s' no encontrado en el proyecto (%s/.gz-ia/toolkits o toolkits) ni globalmente (%s/toolkits)", cleanID, l.projectDir, l.toolingDir)
 }
 
 // loadToolkitFromDir analiza un directorio específico y construye el Toolkit.
@@ -313,8 +314,9 @@ func (l *Loader) ListToolkits() ([]Toolkit, error) {
 		{path: filepath.Join(l.toolingDir, "toolkits"), scope: "global"},
 		{path: l.toolingDir, scope: "global"},
 		// Proyecto después para precedencia local
-		{path: filepath.Join(l.projectDir, ".harness", "toolkits"), scope: "project"},
+		{path: filepath.Join(l.projectDir, ".gz-ia", "toolkits"), scope: "project"},
 		{path: filepath.Join(l.projectDir, "toolkits"), scope: "project"},
+		{path: filepath.Join(l.projectDir, ".harness", "toolkits"), scope: "project"},
 	}
 
 	for _, sd := range searchDirs {
@@ -449,11 +451,17 @@ func (l *Loader) CreateToolkitScaffold(req CreateToolkitRequest) (*Toolkit, erro
 		if l.projectDir == "" {
 			return nil, fmt.Errorf("directorio del proyecto no definido para crear toolkit local")
 		}
+		gziaToolkitsDir := filepath.Join(l.projectDir, ".gz-ia", "toolkits")
 		toolkitsDir := filepath.Join(l.projectDir, "toolkits")
-		if fi, err := os.Stat(toolkitsDir); err == nil && fi.IsDir() {
+		harnessToolkitsDir := filepath.Join(l.projectDir, ".harness", "toolkits")
+		if fi, err := os.Stat(gziaToolkitsDir); err == nil && fi.IsDir() {
+			baseDir = filepath.Join(gziaToolkitsDir, cleanID)
+		} else if fi, err := os.Stat(toolkitsDir); err == nil && fi.IsDir() {
 			baseDir = filepath.Join(toolkitsDir, cleanID)
+		} else if fi, err := os.Stat(harnessToolkitsDir); err == nil && fi.IsDir() {
+			baseDir = filepath.Join(harnessToolkitsDir, cleanID)
 		} else {
-			baseDir = filepath.Join(l.projectDir, ".harness", "toolkits", cleanID)
+			baseDir = filepath.Join(harnessToolkitsDir, cleanID)
 		}
 	}
 

@@ -45,7 +45,7 @@ if [ -z "${REQUESTED_VERSION}" ]; then
     fi
 
     if [ -z "${LATEST_TAG}" ]; then
-        LATEST_TAG="v0.0.2"
+        LATEST_TAG="v0.1.0"
         printf "  ${BLUE}Nota:${NC} No se pudo consultar la API de GitHub, utilizando tag por defecto: ${LATEST_TAG}\n"
     fi
     VERSION="${LATEST_TAG#v}"

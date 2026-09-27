@@ -1,101 +1,122 @@
-# Gestión Segura de Secretos y Variables de Entorno (Vault)
+# Variables de Entorno y Secretos Locales (Vault)
 
-Gountz IA (`gz-ia`) incluye un sistema centralizado y seguro de almacenamiento de secretos y variables de entorno (`internal/features/vault`), diseñado para suministrar credenciales a los agentes de IA sin exponerlas en texto claro ni comitearlas accidentalmente en el historial de Git.
+Gountz IA (`gz-ia`) incluye un gestor local de variables de entorno y credenciales (`internal/features/vault`), diseñado para suministrar configuraciones a los agentes de IA de forma centralizada sin ensuciar tu shell global ni comitearlas en el historial de Git.
 
 ---
 
 ## 1. Filosofía de Seguridad y Almacenamiento
 
-El Vault se gestiona mediante el archivo `.harness/vault.json`:
-- **Permisos Estrictos POSIX `0600`:** Únicamente el usuario propietario del sistema operativo tiene permisos de lectura y escritura (`rw-------`). Cualquier intento de lectura o modificación por otros usuarios del sistema es bloqueado por el kernel Linux.
-- **Escrituras Atómicas:** Toda modificación (`set`, `delete`) escribe primero en un archivo temporal (`.vault.json.tmp`) antes de invocar `os.Rename`, previniendo corrupción de datos ante interrupciones forzadas.
-- **Aislamiento en `.gitignore`:** El directorio `.harness/` se encuentra excluido automáticamente del seguimiento de Git mediante `.git/info/exclude` o `.gitignore`, garantizando que ninguna API key viaje al repositorio remoto.
+El Vault se administra mediante el archivo local `.harness/vault.json`:
+
+- **Formato en Texto Plano:** Se almacena en formato JSON estándar sin cifrado simétrico en reposo con contraseña maestra. No introduzcas tokens bancarios ni credenciales de infraestructura crítica sin evaluar tu modelo de amenazas local.
+- **Permisos Estrictos POSIX `0600`:** Únicamente tu usuario del sistema operativo tiene permisos de lectura y escritura (`rw-------`). Cualquier intento de lectura o modificación por otros usuarios locales del sistema operativo es bloqueado por los permisos del sistema de archivos.
+- **Aislamiento en Git vía `.git/info/exclude`:** La carpeta `.harness/` se encuentra excluida automáticamente del seguimiento de Git mediante `.git/info/exclude` local, garantizando que el archivo nunca viaje al repositorio remoto ni altere tu `git status`.
+- **Escrituras Atómicas:** Toda operación (`set`, `delete`) escribe primero en un archivo temporal (`.vault.json.tmp`) antes de aplicar un reemplazo atómico con `os.Rename`, evitando archivos corruptos si se interrumpe el comando.
+
+> [!WARNING] Modelo de Acceso del Agente en Sesión
+> Ten en cuenta dos consideraciones clave sobre cómo el agente accede a los secretos:
+> 1. **Inyección completa de variables de entorno:** Al iniciar una sesión, `gz-ia` inyecta la totalidad de las variables guardadas en el vault como variables de entorno del proceso hijo del agente. Cualquier comando ejecutado en la sesión (por ejemplo, `env` o `printenv`) tendrá visibilidad de estas claves.
+> 2. **Ruta física accesible desde el worktree:** Desde el árbol de trabajo de la sesión (`.harness/worktrees/<id>`), el archivo `.harness/vault.json` se encuentra a dos niveles de distancia (`../../vault.json`). Un agente con herramientas de lectura de disco o permisos de terminal puede leer el archivo directamente.
 
 ---
 
-## 2. Comandos CLI: `gz-ia vault`
+## 2. Atención: Claude Code, OpenCode y Facturación de API
 
-El comando `gz-ia vault` (o `gz-ia vault list` por defecto) administra el ciclo de vida de los secretos:
+> [!IMPORTANT] Respeta tu Suscripción de Claude Code
+> Si utilizas **Claude Code** con tu suscripción oficial Pro o Team (autenticado mediante `claude login`), **no almacenes `ANTHROPIC_API_KEY` en el vault**.
+> 
+> Cuando `ANTHROPIC_API_KEY` está presente en el entorno de ejecución, Claude Code prioriza esa clave y factura el consumo de tokens a la cuenta de la API de Anthropic, en lugar de utilizar los límites de tu suscripción contratada.
+> 
+> Del mismo modo, **OpenCode** soporta múltiples motores y proveedores (locales, Anthropic, OpenAI, Ollama); solo configura claves de API si tu modelo específico lo requiere.
+
+`gz-ia` no impone claves fijas para iniciar sesiones. Únicamente advertirá sobre variables no configuradas si los toolkits o presets que actives declaran explícitamente dependencias en su propiedad `env`.
+
+---
+
+## 3. Comandos CLI: `gz-ia vault`
+
+El comando `gz-ia vault` (o `gz-ia vault list` por defecto) administra las variables del proyecto:
 
 ### Listar Variables y Estado de Configuración
 ```bash
 gz-ia vault list [-d <directorio>]
 ```
+
 **Salida de ejemplo:**
 ```text
-🔒 Vault de Secretos y Variables de Entorno — Gountz IA
-  Archivo: /home/usuario/proyecto/.harness/vault.json (Permisos 0600, ignorado por Git)
+Variables de Entorno y Secretos (Vault) — Gountz IA
+Archivo: /home/usuario/proyecto/.harness/vault.json (Permisos 0600, ignorado por Git)
 
 VARIABLE                  ESTADO        VALOR ENMASCARADO         RECOMENDADA PARA    
 ─────────────────────────────────────────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY         Vault [✓]     sk-ant-a************34    claude
-OPENAI_API_KEY            Sistema [$]   sk-proj-************99    opencode
-DATABASE_URL              Faltante      (no configurada)          data
+DATABASE_URL              Vault [✓]     postgres://u:*******5432  toolkit-db
+GITHUB_TOKEN              Sistema [$]   ghp_******************ab  herramientas CI/Git
+STRIPE_KEY                Faltante      (no configurada)          toolkit-billing
 ```
+
 - **Estados identificados:**
   - `Vault [✓]`: Almacenada y protegida en `.harness/vault.json`.
   - `Sistema [$]`: Detectada en las variables de entorno del sistema operativo (`$ENV`).
-  - `Faltante`: Variable recomendada por un agente o perfil activo pero no encontrada.
-- **Valores protegidos:** Todos los secretos se muestran ofuscados (`MaskSecret`), revelando solo el prefijo y sufijo mínimo necesario.
+  - `Faltante`: Variable requerida por un toolkit o preset activo pero no encontrada.
+- **Valores protegidos:** Todos los secretos se muestran ofuscados (`MaskSecret`), revelando únicamente el prefijo y sufijo mínimo necesario.
 
 ### Guardar o Actualizar una Variable
 ```bash
-# Modo interactivo seguro (recomendado: entrada enmascarada sin rastro en el historial de shell)
-gz-ia vault set ANTHROPIC_API_KEY
+# Modo interactivo seguro (entrada enmascarada sin dejar rastro en el historial de shell)
+gz-ia vault set DATABASE_URL
 
-# Modo directo pasando el valor como argumento o mediante el flag -v
-gz-ia vault set ANTHROPIC_API_KEY "sk-ant-api03-xxxx..."
-# o
-gz-ia vault set ANTHROPIC_API_KEY -v "sk-ant-api03-xxxx..."
+# Modo directo pasando el valor como argumento
+gz-ia vault set DATABASE_URL "postgres://usuario:pass@localhost:5432/db"
+# o mediante flag -v
+gz-ia vault set DATABASE_URL -v "postgres://usuario:pass@localhost:5432/db"
 ```
+
 > [!TIP] Prevención de fuga en `.bash_history`
-> Si omites el valor al ejecutar `gz-ia vault set <CLAVE>`, el comando abre un formulario interactivo Huh con `EchoModePassword`. El texto introducido no se imprime en pantalla ni queda registrado en el historial de tu shell.
+> Si omites el valor al ejecutar `gz-ia vault set <CLAVE>`, el comando abre un formulario interactivo con `EchoModePassword`. El texto introducido no se imprime en pantalla ni queda registrado en el historial de comandos del shell.
 
 ### Consultar el Estado y Origen de una Variable
 ```bash
 # Inspección segura con valor enmascarado
-gz-ia vault get ANTHROPIC_API_KEY
+gz-ia vault get DATABASE_URL
 
-# Revelar el valor completo en texto plano (útil para tuberías y scripts)
-gz-ia vault get ANTHROPIC_API_KEY --reveal
+# Revelar el valor completo en texto plano (útil para tuberías y scripts locales)
+gz-ia vault get DATABASE_URL --reveal
 ```
 
 ### Eliminar una Variable
 ```bash
-gz-ia vault delete ANTHROPIC_API_KEY
+gz-ia vault delete DATABASE_URL
 # Aliases disponibles:
-gz-ia vault rm ANTHROPIC_API_KEY
-gz-ia vault remove ANTHROPIC_API_KEY
+gz-ia vault rm DATABASE_URL
+gz-ia vault remove DATABASE_URL
 ```
 
 ### Obtener la Ruta Física del Almacén
 ```bash
 gz-ia vault path
 ```
-Imprime la ruta absoluta a `.harness/vault.json`, permitiendo su referencia en scripts o diagnósticos.
+Imprime la ruta absoluta hacia `.harness/vault.json`, permitiendo su referencia en scripts o diagnósticos.
 
 ---
 
-## 3. Detección Proactiva al Iniciar Sesiones
+## 4. Detección de Variables al Iniciar Sesiones
 
-Al iniciar una sesión de chat (`gz-ia chat` o desde la TUI), el arnés analiza automáticamente los requisitos del agente y de los perfiles agénticos activos:
-1. **Validación de Proveedores:**
-   - Si se utiliza `claude`, valida la presencia de `ANTHROPIC_API_KEY`.
-   - Si se utiliza `opencode`, valida `OPENAI_API_KEY`.
-2. **Validación de Perfiles:**
-   - Si el perfil define variables en su campo `env`, verifica si existen en el sistema o en el vault.
-3. **Alerta No Bloqueante:**
-   Si detecta que una variable requerida no está configurada, despliega un aviso claro en pantalla antes de iniciar la sesión:
+Al iniciar una sesión de chat (`gz-ia chat` o desde la TUI), el arnés analiza los requerimientos declarados en los **toolkits y presets activos**:
+
+1. **Inspección de Toolkits:**
+   Si los toolkits seleccionados definen variables en su campo `env` (por ejemplo, `DATABASE_URL` o `API_SECRET`), `gz-ia` verifica si existen en el sistema o en el vault local.
+2. **Aviso No Bloqueante:**
+   Si detecta que una variable requerida no está configurada, despliega un aviso informativo en pantalla antes de iniciar la sesión:
    ```text
-   ⚠️  Aviso de Entorno: Se detectaron variables no configuradas en el entorno ni en el vault:
-      • ANTHROPIC_API_KEY
-      Puedes configurarlas en el vault seguro con: gz-ia vault set ANTHROPIC_API_KEY
+   Aviso de Entorno: Se detectaron variables no configuradas en el entorno ni en el vault:
+      • DATABASE_URL
+      Puedes configurarlas en el vault seguro con: gz-ia vault set DATABASE_URL
    ```
 
 ---
 
-## 4. Inyección Transparente en Procesos de IA
+## 5. Inyección en Procesos de IA
 
-Cuando el agente (`agy`, `claude`, etc.) es lanzado por el ejecutor del sistema operativo (`OSRunner`):
-- `gz-ia` fusiona las variables de entorno actuales del sistema con las almacenadas en el vault.
-- Las variables del vault tienen precedencia segura y se inyectan en el entorno del proceso hijo sin alterar las variables globales del shell del usuario.
+Cuando el agente (`agy`, `claude`, `opencode`, `pi-agent`) es ejecutado:
+- `gz-ia` toma las variables de entorno actuales del sistema operativo y les superpone las almacenadas en `.harness/vault.json`.
+- Las variables del vault tienen precedencia y se inyectan en el entorno del proceso hijo del agente sin modificar las variables globales del shell del usuario.

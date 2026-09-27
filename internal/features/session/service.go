@@ -246,15 +246,10 @@ func (s *sessionService) StartChat(ctx context.Context, req StartChatRequest) er
 			}
 		}
 
-		if prov == "claude" {
-			requiredKeys = append(requiredKeys, "ANTHROPIC_API_KEY")
-		} else if prov == "opencode" {
-			requiredKeys = append(requiredKeys, "OPENAI_API_KEY")
-		}
 
 		if len(requiredKeys) > 0 {
 			if missing, err := s.vault.ValidateRequired(ctx, requiredKeys); err == nil && len(missing) > 0 {
-				fmt.Fprintf(os.Stderr, "\n\033[1;33m⚠️  Aviso de Entorno:\033[0m Se detectaron variables no configuradas en el entorno ni en el vault:\n")
+				fmt.Fprintf(os.Stderr, "\n\033[1;33m▲ Aviso de Entorno:\033[0m Se detectaron variables no configuradas en el entorno ni en el vault:\n")
 				for _, k := range missing {
 					fmt.Fprintf(os.Stderr, "   • \033[1m%s\033[0m\n", k)
 				}

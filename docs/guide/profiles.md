@@ -17,26 +17,29 @@ En configuraciones tradicionales, los proyectos suelen acumular:
 ### La Solución de gz-ia: Toolkits Atómicos y Perfiles Emergentes
 - **El Toolkit como Unidad Atómica:** Un paquete modular, reutilizable y autónomo que agrupa directivas maestras (`AGENTS.md`), reglas arquitectónicas (`rules/`), habilidades procedimentales (`skills/`), y herramientas ejecutables MCP (`tools.json` / `tools/`) protegidas por un Circuit Breaker.
 - **El Perfil como Composición Emergente:** Un "perfil" no es un archivo estático en el disco ni una plantilla rígida. Es la **suma activa y coherente de uno o más toolkits** elegidos para una sesión de trabajo específica. Puede surgir al vuelo pasando banderas en la CLI (`-T react -T postgres`), seleccionándolos en la TUI, o declarando un **Preset** conveniente en `config.json`.
-- **Cero Contaminación (Zero-Pollution):** Tu rama base permanece impecable. Todo el tooling se proyecta dinámicamente mediante enlaces simbólicos y síntesis en caliente dentro del worktree aislado de la sesión (`.harness/worktrees/<id>`).
+- **Aislamiento en Git:** Tu rama base no se modifica mientras el agente trabaja. Todo el tooling se proyecta dinámicamente mediante enlaces simbólicos y síntesis en caliente dentro del worktree de la sesión (`.harness/worktrees/<id>`).
 
 ---
 
 ## <span id="anatomia-de-un-toolkit-modular"></span>2. Anatomía de un Toolkit Modular
 
-Cada toolkit vive en su propio directorio dentro del catálogo del proyecto (`.harness/toolkits/<id>`) o del catálogo global del usuario (`~/.config/gz-ia/tooling/toolkits/<id>`):
+Cada toolkit vive en su propio directorio. Según el alcance deseado, se ubica en:
+1. **Catálogo de proyecto versionado en Git (Recomendado para equipos):** `.gz-ia/toolkits/<id>` o `toolkits/<id>`. Al no estar dentro de `.harness/`, viaja con el repositorio en Git y está disponible para todos tus compañeros de equipo.
+2. **Catálogo de proyecto local (Efímero / Personal):** `.harness/toolkits/<id>`. Excluido de Git mediante `.git/info/exclude`, ideal para pruebas locales que no deseas compartir.
+3. **Catálogo global de usuario:** `~/.config/gz-ia/tooling/toolkits/<id>`. Accesible desde cualquier proyecto en tu máquina.
 
 ```text
-.harness/toolkits/toolkit-frontend/         (o ~/.config/gz-ia/tooling/toolkits/...)
-├── toolkit.json                            # Descriptor opcional de metadatos y entorno
-├── AGENTS.md                               # Directivas base y contexto del toolkit
-├── rules/                                  # Reglas arquitectónicas modulares
+.gz-ia/toolkits/toolkit-frontend/         (o ~/.config/gz-ia/tooling/toolkits/...)
+├── toolkit.json                          # Descriptor opcional de metadatos y entorno
+├── AGENTS.md                             # Directivas base y contexto del toolkit
+├── rules/                                # Reglas arquitectónicas modulares
 │   ├── react-conventions.md
 │   └── tailwind-standards.md
-├── skills/                                 # Catálogo de procedimientos especializados
+├── skills/                               # Catálogo de procedimientos especializados
 │   └── e2e-testing/
 │       └── SKILL.md
-├── tools.json                              # Declaración de herramientas ejecutables JSON-RPC
-└── tools/                                  # Scripts o binarios complementarios
+├── tools.json                            # Declaración de herramientas ejecutables JSON-RPC
+└── tools/                                # Scripts o binarios complementarios
     └── audit-bundle.sh
 ```
 
@@ -298,7 +301,7 @@ Para evitar confusiones habituales, esta es la jerarquía del sistema:
 
 | Concepto | Qué representa | Dónde se define | Ejemplo de uso |
 | :--- | :--- | :--- | :--- |
-| **Toolkit** | La unidad atómica de capacidad de un stack (directivas, reglas, skills y MCP). | `.harness/toolkits/<id>` o `~/.config/gz-ia/tooling/toolkits/<id>` | `gz-ia toolkit create rn-tailwind` |
+| **Toolkit** | La unidad atómica de capacidad de un stack (directivas, reglas, skills y MCP). | `.gz-ia/toolkits/<id>` (compartido en repo), `toolkits/<id>`, `.harness/toolkits/<id>` (local) o `~/.config/gz-ia/tooling/toolkits/<id>` | `gz-ia toolkit create rn-tailwind` |
 | **Preset (Perfil)** | Composición conveniente de 1 o más toolkits bajo un nombre agrupador. | `~/.config/gz-ia/tooling/config.json` | `fullstack = frontend + backend` |
 | **Driver** | El adaptador que conecta y traduce comandos hacia un CLI de IA específico. | Código de `gz-ia` (`session.Driver`) | `agy`, `claude`, `opencode`, `pi-agent` |
 | **Sesión** | Una ejecución en un Git Worktree aislado con un agente y toolkits activos. | `.harness/worktrees/<id>` | `gz-ia chat -p agy -P fullstack` |
@@ -307,7 +310,7 @@ Para evitar confusiones habituales, esta es la jerarquía del sistema:
 
 ## 9. Ejemplo Real Completo y Copiable: Toolkit React Native + Tailwind
 
-Este es un ejemplo 100% funcional y listo para copiar en tu proyecto. Crea la carpeta `.harness/toolkits/rn-tailwind/` y coloca los siguientes archivos:
+Este es un ejemplo listo para versionar y compartir con tu equipo en el repositorio. Crea la carpeta `.gz-ia/toolkits/rn-tailwind/` (o `.harness/toolkits/rn-tailwind/` si solo lo quieres para pruebas locales) y coloca los siguientes archivos:
 
 ### 1. Descriptor del Toolkit (`toolkit.json`)
 ```json
@@ -315,7 +318,6 @@ Este es un ejemplo 100% funcional y listo para copiar en tu proyecto. Crea la ca
   "id": "rn-tailwind",
   "description": "Desarrollo Móvil con React Native, NativeWind (Tailwind) y TypeScript",
   "env": {
-    "EXPO_USE_METRO_WORKSPACE_ROOT": "true",
     "NODE_ENV": "development"
   },
   "mcp_servers": {}
@@ -379,9 +381,12 @@ Cuando el usuario pida verificar un flujo de usuario o pantalla en emulador:
 ]
 ```
 
-Con solo guardar esta estructura en `.harness/toolkits/rn-tailwind/`, cualquier desarrollador puede ejecutar:
+> [!NOTE] Requisitos de Ejecución de Herramientas en Worktrees
+> Las herramientas de validación que ejecutan compiladores locales (como `npx tsc --noEmit`) requieren que las dependencias estén resueltas en el entorno de la sesión (mediante el symlink a `node_modules` de la raíz o instalación global). Si el ejecutable no está disponible en el worktree, el comando fallará y el Circuit Breaker de Orchy aislará la herramienta marcándola como `DEAD` para no interrumpir el resto de la sesión del agente.
+
+Con solo versionar esta estructura en `.gz-ia/toolkits/rn-tailwind/`, cualquier desarrollador del equipo con acceso al repositorio puede ejecutar:
 ```bash
 gz-ia chat -p claude -T rn-tailwind -i "Crear pantalla de Perfil de Usuario con avatar y datos"
 ```
-Y Claude Code (o Google Antigravity) recibirá automáticamente todas las directivas de TypeScript, estándares de NativeWind, la habilidad de pruebas Maestro y la herramienta `check_mobile_types`, todo en un worktree aislado sin ensuciar tu editor.
+Y Claude Code (o Google Antigravity) recibirá automáticamente todas las directivas de TypeScript, estándares de NativeWind, la habilidad de pruebas Maestro y la herramienta `check_mobile_types`, todo en un worktree aislado sin alterar tu directorio de trabajo.
 

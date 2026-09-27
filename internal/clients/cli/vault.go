@@ -244,7 +244,7 @@ func runVaultList(c *cobra.Command, workDir string) error {
 
 	fmt.Fprintln(c.OutOrStdout())
 	tip := lipgloss.NewStyle().Foreground(tui.ColorMuted).
-		Render(fmt.Sprintf("💡 Tip: Configura variables con 'gz-ia vault set <VARIABLE>' o usa 'gz-ia vault get <VARIABLE> --reveal'."))
+		Render(fmt.Sprintf("Tip: Configura variables con 'gz-ia vault set <VARIABLE>' o usa 'gz-ia vault get <VARIABLE> --reveal'."))
 	fmt.Fprintln(c.OutOrStdout(), tip)
 
 	return nil

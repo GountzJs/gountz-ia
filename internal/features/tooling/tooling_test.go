@@ -436,6 +436,28 @@ func TestToolingService_CreateToolkitScaffold(t *testing.T) {
 	if tkWs.Scope != "project" {
 		t.Errorf("Scope esperado 'project', obtenido: %s", tkWs.Scope)
 	}
+
+	// 5. Crear toolkit local en un workspace que tiene directorio .gz-ia/toolkits/
+	gziaWorkspaceDir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(gziaWorkspaceDir, ".gz-ia", "toolkits"), 0755)
+	svcGzia := NewService(globalDir, gziaWorkspaceDir)
+
+	reqGzia := CreateToolkitRequest{
+		ID:          "team-tk",
+		Description: "Toolkit compartido de equipo",
+		Global:      false,
+	}
+	tkGzia, err := svcGzia.CreateToolkit(ctx, reqGzia)
+	if err != nil {
+		t.Fatalf("CreateToolkit en .gz-ia falló: %v", err)
+	}
+	gziaFile := filepath.Join(gziaWorkspaceDir, ".gz-ia", "toolkits", "team-tk", "toolkit.json")
+	if _, statErr := os.Stat(gziaFile); statErr != nil {
+		t.Errorf("Archivo en .gz-ia/toolkits/ no encontrado: %s", gziaFile)
+	}
+	if tkGzia.Scope != "project" {
+		t.Errorf("Scope esperado 'project', obtenido: %s", tkGzia.Scope)
+	}
 }
 
 func TestToolingService_ResolveToolkits(t *testing.T) {

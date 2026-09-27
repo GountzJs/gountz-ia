@@ -6,6 +6,36 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.1.0] - 2026-09-27
+
+### Consolidación — Toolkits de Equipo en Git, Seguridad en Vault y Estabilidad de Terminal
+
+Esta versión marca la transición a **v0.1.0**, incorporando toolkits compartidos para equipos en Git, saneamiento del ciclo de vida de procesos interactivos, respeto irrestricto a suscripciones oficiales de Claude Code y compatibilidad documentada para entornos frontend modernos.
+
+#### Novedades y Mejoras
+
+- **Toolkits de Equipo Versionados en Git (`.gz-ia/toolkits/` y `toolkits/`):**
+  - Soporte en `internal/features/tooling/loader.go` para descubrir y crear toolkits dentro de `.gz-ia/toolkits/<id>` y `toolkits/<id>`.
+  - Permite que los equipos compartan directivas, reglas, skills procedimentales y herramientas MCP directamente en el repositorio Git del proyecto (sin ser excluidos por `.harness/`).
+- **Respeto a Suscripciones Oficiales (Claude Code y OpenCode):**
+  - Eliminación de la validación hardcodeada de `ANTHROPIC_API_KEY` y `OPENAI_API_KEY` en `session.Service`.
+  - Claude Code opera de forma nativa con suscripción Pro/Team vía OAuth (`claude login`) sin empujar al usuario a gastar saldo de API por tokens.
+- **Estabilidad de Terminal TTY y Señal `SIGTTOU`:**
+  - Protección explícita con `signal.Ignore(syscall.SIGTTOU, syscall.SIGTTIN)` en `sysproc_unix.go` durante la restauración del control de la terminal interactiva, evitando que shells como Bash o Zsh suspendan el proceso `gz-ia`.
+- **Saneamiento de Dependencias y Dev Servers Frontend:**
+  - Corrección de la ruta del symlink hacia la raíz del proyecto a 3 niveles (`../../../node_modules`).
+  - Documentación de exclusiones críticas para evitar recargas continuas en dev servers (Vite `server.watch.ignored: ['**/.harness/**']`) y escaneos de Tailwind CSS.
+  - Advertencia sobre el comportamiento de Git ante reglas con trailing slash (`node_modules/` no ignora enlaces simbólicos de archivos).
+- **Desinstalación Idempotente y Limpieza de Configuración:**
+  - Comando de poda de ramas robusto mediante `git for-each-ref` y `xargs -r git branch -D`.
+  - Alerta previa sobre el borrado irreversible de secretos en `.harness/vault.json`.
+  - Instrucciones para limpiar la entrada `.harness` en `.git/info/exclude` y la directiva `extensions.worktreeConfig`.
+- **Estandarización de Estilo e Interfaz:**
+  - Redacción completamente unificada en tuteo neutro en toda la documentación.
+  - Depuración de emojis saturados en títulos y mensajes de CLI/TUI, consolidando glifos tipográficos sobrios y consistentes.
+
+---
+
 ## [0.0.3] - 2026-09-27
 
 ### Tercera Entrega — Toolkits Modulares, Presets Emergentes y Refactor de Tooling

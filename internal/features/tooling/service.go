@@ -464,7 +464,7 @@ func (s *toolingService) ProjectIntoWorktree(ctx context.Context, targetDir stri
 
 	var fullContent string
 	if hasOriginal && strings.TrimSpace(origContent) != "" {
-		fullContent = fmt.Sprintf("# 📌 Reglas Originales del Proyecto\n\n%s\n\n---\n\n%s", strings.TrimSpace(origContent), masterContent)
+		fullContent = fmt.Sprintf("# Reglas Originales del Proyecto\n\n%s\n\n---\n\n%s", strings.TrimSpace(origContent), masterContent)
 	} else {
 		fullContent = masterContent
 	}
@@ -582,7 +582,7 @@ func generateMasterAgentsMarkdown(composed *ComposedTooling, sessionID string) s
 	sb.WriteString(fmt.Sprintf("> **Sesión ID:** `%s` | **Toolkits Activos:** `%s`\n\n", sessionID, strings.Join(composed.ActiveToolkits, ", ")))
 
 	if len(composed.AgentsFiles) > 0 {
-		sb.WriteString("## 📚 Directivas de Dominio y Toolkits\n")
+		sb.WriteString("## Directivas de Dominio y Toolkits\n")
 		sb.WriteString("Esta sesión integra los siguientes paquetes de directivas. Consulta y acata las guías de cada archivo:\n\n")
 		for filename := range composed.AgentsFiles {
 			sb.WriteString(fmt.Sprintf("- [%s](%s)\n", filename, filename))
@@ -591,7 +591,7 @@ func generateMasterAgentsMarkdown(composed *ComposedTooling, sessionID string) s
 	}
 
 	if len(composed.RulesFiles) > 0 {
-		sb.WriteString("## 📐 Reglas y Estándares de Arquitectura (`.agents/rules/`)\n")
+		sb.WriteString("## Reglas y Estándares de Arquitectura (`.agents/rules/`)\n")
 		for ruleFilename := range composed.RulesFiles {
 			sb.WriteString(fmt.Sprintf("- `%s`\n", ruleFilename))
 		}
@@ -599,7 +599,7 @@ func generateMasterAgentsMarkdown(composed *ComposedTooling, sessionID string) s
 	}
 
 	if len(composed.Tools) > 0 {
-		sb.WriteString("## 🛠️ Herramientas MCP Disponibles (vía Microkernel Orchy)\n")
+		sb.WriteString("## Herramientas MCP Disponibles (vía Microkernel Orchy)\n")
 		for _, t := range composed.Tools {
 			desc := t.Description
 			if desc == "" {

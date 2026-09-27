@@ -159,14 +159,29 @@ Dado que cada worktree contiene una copia de los archivos del proyecto, es recom
     "exclude": ["node_modules", ".harness"]
   }
   ```
+- **Dev Servers (Vite, Webpack, Turbopack):** Para evitar que el servidor de desarrollo recargue continuamente la aplicación cuando el agente edita archivos en el worktree, excluye `.harness/**` en la configuración del watcher. En **Vite** (`vite.config.ts`):
+  ```ts
+  export default defineConfig({
+    server: {
+      watch: {
+        ignored: ['**/.harness/**']
+      }
+    }
+  })
+  ```
+- **Tailwind CSS:** Evita globs genéricos sobre la raíz (`./**/*.{ts,tsx}`) que escanean copias dentro de `.harness/worktrees/`; delimita el content a las carpetas de código fuente (ej. `./src/**/*.{ts,tsx}`).
 - **ESLint / Biome / Jest / Vitest:** Asegúrate de incluir `.harness/**` en los patrones de archivos ignorados (`ignorePatterns`).
 - **File Watchers en IDEs:** En VS Code o JetBrains, excluye `.harness/` en `files.watcherExclude` para reducir consumo innecesario de memoria y CPU.
 
 ### 2. Gestión de Dependencias (Node / Frontend)
 En proyectos Node/Frontend, un worktree nuevo no hereda `node_modules` automáticamente al ser un árbol de archivos separado:
 - **npm / yarn:** Ejecutar `npm ci` o `npm install` en cada sesión puede ser pesado y consumir tiempo.
-- **Recomendación con pnpm:** Se recomienda usar gestores basados en enlaces globales como **pnpm**, que comparten paquetes a través de hard links globales sin duplicar gigabytes en disco.
-- **Symlinks manuales:** Para tareas rápidas, se puede crear un symlink al `node_modules` raíz dentro del worktree de la sesión si la estructura de dependencias es compatible.
+- **Recomendación con pnpm / bun:** Se recomienda usar gestores basados en enlaces globales como **pnpm** o **bun**, que comparten paquetes a través de enlaces duros en disco sin duplicar espacio.
+- **Symlinks manuales (3 niveles):** Para tareas rápidas, crea un symlink subiendo tres niveles desde el worktree hasta la raíz del proyecto:
+  ```bash
+  ln -s $(gz-ia session path <id>)/../../../node_modules $(gz-ia session path <id>)/node_modules
+  ```
+  *(Nota: si tu `.gitignore` define `node_modules/` con barra final, cámbialo a `node_modules` sin barra para que Git ignore también el symlink y no intente commitearlo en `session get`).*
 
 ### 3. Soporte de Plataformas (Linux & Windows)
 `gz-ia` compila de forma nativa para:

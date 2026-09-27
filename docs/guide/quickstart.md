@@ -144,13 +144,13 @@ Para evitar que linters, Jest, compiladores TypeScript o watchers de IDE indexen
     "exclude": ["node_modules", ".harness"]
   }
   ```
-- **`.gitignore`:** `gz-ia` registra automáticamente `.harness/` en el `.gitignore` del proyecto.
-- **ESLint / IDE Watchers:** Incluye `.harness/**` en los patrones ignorados para reducir consumo de recursos.
+- **Exclusión Git:** `gz-ia` registra automáticamente `.harness/` en `.git/info/exclude` del repositorio local para que permanezca ignorado sin ensuciar tu archivo `.gitignore` compartido.
+- **ESLint / IDE Watchers / Vite:** Incluye `.harness/**` en los patrones ignorados (por ejemplo, `server.watch.ignored: ['**/.harness/**']` en Vite) para prevenir recargas innecesarias.
 
 ### Gestión de Dependencias (Proyectos Node / Frontend)
 Dado que cada worktree es un árbol de archivos separado, no comparte automáticamente la carpeta `node_modules`:
-- En proyectos con dependencias pesadas, se recomienda usar gestores con cache y enlaces globales como **pnpm** para evitar ejecuciones lentas de `npm install`.
-- Opcionalmente, puedes crear un symlink al `node_modules` de la raíz del repositorio hacia el worktree de la sesión.
+- En proyectos con dependencias pesadas, se recomienda usar gestores con cache y enlaces globales como **pnpm** o **bun** para evitar instalaciones lentas.
+- Opcionalmente, puedes crear un symlink al `node_modules` de la raíz subiendo tres niveles (`ln -s $(gz-ia session path <id>)/../../../node_modules $(gz-ia session path <id>)/node_modules`). Asegúrate de que tu `.gitignore` tenga `node_modules` sin barra final para no commitear el symlink.
 
 ---
 

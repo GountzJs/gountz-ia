@@ -17,8 +17,8 @@ func isTerminal(fd int) bool {
 }
 
 func restoreTTY(fd int, parentPgid int) {
-	signal.Ignore(syscall.SIGTTOU)
-	defer signal.Reset(syscall.SIGTTOU)
+	signal.Ignore(syscall.SIGTTOU, syscall.SIGTTIN)
+	defer signal.Reset(syscall.SIGTTOU, syscall.SIGTTIN)
 	_ = unix.IoctlSetPointerInt(fd, unix.TIOCSPGRP, parentPgid)
 }
 

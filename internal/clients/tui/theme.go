@@ -58,7 +58,7 @@ func GetIcons() IconSet {
 		Box:       "◆",
 		Arrow:     "❯",
 		Palette:   "●",
-		Bolt:      "⚡",
+		Bolt:      "•",
 		Shield:    "•",
 		Lock:      "•",
 		Plan:      "•",

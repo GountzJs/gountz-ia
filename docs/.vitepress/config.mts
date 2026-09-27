@@ -4,7 +4,7 @@ import { withMermaid } from 'vitepress-plugin-mermaid'
 export default withMermaid(
   defineConfig({
   title: 'Gountz IA',
-  description: 'Gountz IA (gz-ia) — Harness Universal de Terminal para Agentes de IA, Microkernel Orchy y Aislamiento en Git Worktrees',
+  description: 'Gountz IA (gz-ia) — Declara tu stack una vez y compártelo entre Google Antigravity, Claude Code y OpenCode con control de cambios limpio en Git.',
   lang: 'es-ES',
   cleanUrls: true,
   head: [
@@ -21,7 +21,7 @@ export default withMermaid(
       { text: 'Microkernel Orchy', link: '/orchy/microkernel', activeMatch: '/orchy/' },
       { text: 'Referencia CLI & API', link: '/reference/cli', activeMatch: '/reference/' },
       {
-        text: 'v0.0.3',
+        text: 'v0.1.0',
         items: [
           { text: 'Changelog', link: '/reference/changelog' },
           { text: 'Repositorio', link: 'https://github.com/GountzJs/gountz-ia' }
@@ -118,7 +118,7 @@ export default withMermaid(
       { icon: 'github', link: 'https://github.com/GountzJs/gountz-ia' }
     ],
     footer: {
-      message: 'Gountz IA (gz-ia) — Universal Terminal AI Harness',
+      message: 'Gountz IA (gz-ia) — Entorno de ejecución y toolkits para agentes de terminal',
       copyright: 'Copyright © 2026 Tomas & gz-ia Contributors'
     },
     outline: {
