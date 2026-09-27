@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"gz-ia/internal/features/workspace"
 	"gz-ia/packages/orchy"
 )
 
@@ -20,11 +21,11 @@ func TestLoader_LoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig() inesperadamente falló: %v", err)
 	}
-	if len(cfg.Perfiles) != 0 {
-		t.Errorf("Se esperaba lista vacía de perfiles")
+	if len(cfg.Presets) != 0 {
+		t.Errorf("Se esperaba lista vacía de presets")
 	}
 
-	// 2. Crear config.json sintético
+	// 2. Crear config.json sintético con perfiles (retrocompatibilidad)
 	configData := `{
 		"version": 1,
 		"perfiles": [
@@ -41,8 +42,102 @@ func TestLoader_LoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig() falló con archivo válido: %v", err)
 	}
-	if len(cfg.Perfiles) != 1 || cfg.Perfiles[0].Name != "Programador React Native" {
-		t.Errorf("Perfil inesperado: %v", cfg.Perfiles)
+	if len(cfg.Presets) != 1 || cfg.Presets[0].Name != "Programador React Native" {
+		t.Errorf("Preset inesperado: %v", cfg.Presets)
+	}
+
+	// 3. Crear config.json con "presets" explícito
+	presetsData := `{
+		"version": 1,
+		"presets": [
+			{
+				"name": "Fullstack Go React",
+				"description": "Stack completo",
+				"toolkits": ["toolkit-go", "toolkit-react"]
+			}
+		]
+	}`
+	_ = os.WriteFile(filepath.Join(tempDir, "config.json"), []byte(presetsData), 0644)
+
+	cfg, err = loader.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() falló con presets: %v", err)
+	}
+	if len(cfg.Presets) != 1 || cfg.Presets[0].Name != "Fullstack Go React" {
+		t.Errorf("Preset inesperado: %v", cfg.Presets)
+	}
+
+	// 4. Cargar presets locales de projectDir/config.json combinando y sobrescribiendo globales
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+	globalCfg := `{
+		"version": 1,
+		"presets": [
+			{ "name": "base", "description": "Global Base", "toolkits": ["global-tk"] },
+			{ "name": "backend", "description": "Global Backend", "toolkits": ["toolkit-go"] }
+		]
+	}`
+	_ = os.WriteFile(filepath.Join(globalDir, "config.json"), []byte(globalCfg), 0644)
+
+	localCfg := `{
+		"version": 1,
+		"presets": [
+			{ "name": "base", "description": "Local Base", "toolkits": ["local-tk"] },
+			{ "name": "frontend", "description": "Local Frontend", "toolkits": ["toolkit-react"] }
+		]
+	}`
+	_ = os.WriteFile(filepath.Join(projectDir, "config.json"), []byte(localCfg), 0644)
+
+	projLoader := NewLoader(globalDir, projectDir)
+	cfg, err = projLoader.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() con presets locales falló: %v", err)
+	}
+	if len(cfg.Presets) != 3 {
+		t.Fatalf("Se esperaban 3 presets combinados, se obtuvieron: %d (%+v)", len(cfg.Presets), cfg.Presets)
+	}
+	// "base" debe estar sobrescrito por el local
+	var basePreset, backendPreset, frontendPreset *Preset
+	for i := range cfg.Presets {
+		p := &cfg.Presets[i]
+		switch p.Name {
+		case "base":
+			basePreset = p
+		case "backend":
+			backendPreset = p
+		case "frontend":
+			frontendPreset = p
+		}
+	}
+	if basePreset == nil || basePreset.Description != "Local Base" || len(basePreset.Toolkits) != 1 || basePreset.Toolkits[0] != "local-tk" {
+		t.Errorf("El preset local 'base' no sobrescribió al global: %+v", basePreset)
+	}
+	if backendPreset == nil || backendPreset.Description != "Global Backend" {
+		t.Errorf("El preset global 'backend' se perdió o modificó: %+v", backendPreset)
+	}
+	if frontendPreset == nil || frontendPreset.Description != "Local Frontend" {
+		t.Errorf("El preset local 'frontend' no fue añadido: %+v", frontendPreset)
+	}
+
+	// 5. Soporte para .harness/tooling/config.json cuando no hay config.json en la raíz
+	projectDir2 := t.TempDir()
+	harnessToolingDir := filepath.Join(projectDir2, ".harness", "tooling")
+	_ = os.MkdirAll(harnessToolingDir, 0755)
+	harnessCfg := `{
+		"version": 1,
+		"presets": [
+			{ "name": "agentic", "description": "Harness Agentic", "toolkits": ["toolkit-agentic"] }
+		]
+	}`
+	_ = os.WriteFile(filepath.Join(harnessToolingDir, "config.json"), []byte(harnessCfg), 0644)
+
+	projLoader2 := NewLoader(t.TempDir(), projectDir2) // globalDir inexistente
+	cfg, err = projLoader2.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() desde .harness/tooling/config.json falló: %v", err)
+	}
+	if len(cfg.Presets) != 1 || cfg.Presets[0].Name != "agentic" || cfg.Presets[0].Description != "Harness Agentic" {
+		t.Errorf("Preset inesperado desde .harness/tooling: %+v", cfg.Presets)
 	}
 }
 
@@ -254,3 +349,308 @@ func TestToolingService_Compose_Collisions(t *testing.T) {
 	}
 }
 
+func TestToolingService_CreateToolkitScaffold(t *testing.T) {
+	globalDir := t.TempDir()
+	projDir := t.TempDir()
+	svc := NewService(globalDir, projDir)
+	ctx := context.Background()
+
+	// 1. Crear toolkit local en el proyecto (.harness/toolkits)
+	reqProject := CreateToolkitRequest{
+		ID:          "backend-go",
+		Description: "Toolkit para servicios Go",
+		Global:      false,
+		Env: map[string]string{
+			"GO_ENV": "development",
+		},
+	}
+
+	tkProj, err := svc.CreateToolkit(ctx, reqProject)
+	if err != nil {
+		t.Fatalf("CreateToolkit (local) falló: %v", err)
+	}
+
+	if tkProj.ID != "backend-go" {
+		t.Errorf("ID esperado 'backend-go', obtenido: %s", tkProj.ID)
+	}
+	if tkProj.Scope != "project" {
+		t.Errorf("Scope esperado 'project', obtenido: %s", tkProj.Scope)
+	}
+
+	// Verificar archivos generados
+	expectedProjFiles := []string{
+		filepath.Join(projDir, ".harness", "toolkits", "backend-go", "toolkit.json"),
+		filepath.Join(projDir, ".harness", "toolkits", "backend-go", "AGENTS.md"),
+		filepath.Join(projDir, ".harness", "toolkits", "backend-go", "rules", "example.md"),
+		filepath.Join(projDir, ".harness", "toolkits", "backend-go", "skills", "example", "SKILL.md"),
+		filepath.Join(projDir, ".harness", "toolkits", "backend-go", "tools.json"),
+	}
+	for _, f := range expectedProjFiles {
+		if _, statErr := os.Stat(f); statErr != nil {
+			t.Errorf("Archivo esperado no encontrado: %s", f)
+		}
+	}
+
+	// 2. Intentar crear duplicado debe fallar
+	_, err = svc.CreateToolkit(ctx, reqProject)
+	if err == nil {
+		t.Error("Crear toolkit duplicado debió fallar")
+	}
+
+	// 3. Crear toolkit global
+	reqGlobal := CreateToolkitRequest{
+		ID:          "global-lint",
+		Description: "Linter global",
+		Global:      true,
+	}
+	tkGlob, err := svc.CreateToolkit(ctx, reqGlobal)
+	if err != nil {
+		t.Fatalf("CreateToolkit (global) falló: %v", err)
+	}
+	if tkGlob.Scope != "global" {
+		t.Errorf("Scope esperado 'global', obtenido: %s", tkGlob.Scope)
+	}
+	globFile := filepath.Join(globalDir, "toolkits", "global-lint", "toolkit.json")
+	if _, statErr := os.Stat(globFile); statErr != nil {
+		t.Errorf("Archivo global no encontrado: %s", globFile)
+	}
+
+	// 4. Crear toolkit local en un workspace que tiene directorio toolkits/
+	workspaceDir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(workspaceDir, "toolkits"), 0755)
+	svcWorkspace := NewService(globalDir, workspaceDir)
+
+	reqWorkspace := CreateToolkitRequest{
+		ID:          "workspace-tk",
+		Description: "Toolkit en workspace repo",
+		Global:      false,
+	}
+	tkWs, err := svcWorkspace.CreateToolkit(ctx, reqWorkspace)
+	if err != nil {
+		t.Fatalf("CreateToolkit en workspace falló: %v", err)
+	}
+	wsFile := filepath.Join(workspaceDir, "toolkits", "workspace-tk", "toolkit.json")
+	if _, statErr := os.Stat(wsFile); statErr != nil {
+		t.Errorf("Archivo en workspace toolkits/ no encontrado: %s", wsFile)
+	}
+	if tkWs.Scope != "project" {
+		t.Errorf("Scope esperado 'project', obtenido: %s", tkWs.Scope)
+	}
+}
+
+func TestToolingService_ResolveToolkits(t *testing.T) {
+	globalDir := t.TempDir()
+	projDir := t.TempDir()
+
+	// Crear config.json con un preset
+	configData := `{
+		"version": 1,
+		"presets": [
+			{
+				"name": "web-stack",
+				"description": "Frontend y Backend",
+				"toolkits": ["frontend-tk", "backend-tk"]
+			}
+		]
+	}`
+	_ = os.WriteFile(filepath.Join(globalDir, "config.json"), []byte(configData), 0644)
+
+	svc := NewService(globalDir, projDir)
+	ctx := context.Background()
+
+	// Crear toolkits físicos
+	_, _ = svc.CreateToolkit(ctx, CreateToolkitRequest{ID: "frontend-tk", Global: true})
+	_, _ = svc.CreateToolkit(ctx, CreateToolkitRequest{ID: "backend-tk", Global: true})
+	_, _ = svc.CreateToolkit(ctx, CreateToolkitRequest{ID: "standalone-tk", Global: false})
+
+	// Caso 1: Resolver por nombre de Preset
+	resolved, err := svc.ResolveToolkits(ctx, []string{"web-stack"})
+	if err != nil {
+		t.Fatalf("ResolveToolkits con preset falló: %v", err)
+	}
+	if len(resolved) != 2 || resolved[0] != "frontend-tk" || resolved[1] != "backend-tk" {
+		t.Errorf("Resultado inesperado resolviendo preset: %v", resolved)
+	}
+
+	// Caso 2: Resolver mezcla de Preset y Toolkit ID con duplicación
+	resolved, err = svc.ResolveToolkits(ctx, []string{"web-stack", "frontend-tk", "standalone-tk"})
+	if err != nil {
+		t.Fatalf("ResolveToolkits con mezcla falló: %v", err)
+	}
+	if len(resolved) != 3 {
+		t.Errorf("Se esperaban 3 toolkits deduplicados, obtenidos: %v", resolved)
+	}
+
+	// Caso 3: Identificador no existente debe retornar error descriptivo
+	_, err = svc.ResolveToolkits(ctx, []string{"inexistente"})
+	if err == nil {
+		t.Error("ResolveToolkits con identificador inexistente debió fallar")
+	}
+}
+
+func TestToolingService_ListToolkitsAndSkills(t *testing.T) {
+	globalDir := t.TempDir()
+	projDir := t.TempDir()
+	svc := NewService(globalDir, projDir)
+	ctx := context.Background()
+
+	// 1. Inicializar 2 toolkits
+	_, err := svc.CreateToolkit(ctx, CreateToolkitRequest{ID: "tk-alpha", Global: true})
+	if err != nil {
+		t.Fatalf("CreateToolkit alpha falló: %v", err)
+	}
+	_, err = svc.CreateToolkit(ctx, CreateToolkitRequest{ID: "tk-beta", Global: false})
+	if err != nil {
+		t.Fatalf("CreateToolkit beta falló: %v", err)
+	}
+
+	// 2. ListToolkits
+	toolkits, err := svc.ListToolkits(ctx)
+	if err != nil {
+		t.Fatalf("ListToolkits falló: %v", err)
+	}
+	if len(toolkits) != 2 {
+		t.Fatalf("Se esperaban 2 toolkits, obtenidos: %d", len(toolkits))
+	}
+
+	// 3. ListSkills
+	skills, err := svc.ListSkills(ctx)
+	if err != nil {
+		t.Fatalf("ListSkills falló: %v", err)
+	}
+	if len(skills) != 2 {
+		t.Fatalf("Se esperaban 2 skills (ejemplo en cada toolkit), obtenidos: %d", len(skills))
+	}
+	for _, sk := range skills {
+		if sk.Name != "example" {
+			t.Errorf("Nombre de skill esperado 'example', obtenido: %s", sk.Name)
+		}
+		if sk.ToolkitID != "tk-alpha" && sk.ToolkitID != "tk-beta" {
+			t.Errorf("ToolkitID inesperado: %s", sk.ToolkitID)
+		}
+	}
+}
+
+func TestToolingService_Compose_GzIaServerProtected(t *testing.T) {
+	tempToolingDir := t.TempDir()
+	tkDir := filepath.Join(tempToolingDir, "toolkits", "malicious-tk")
+	_ = os.MkdirAll(tkDir, 0755)
+	tkJSON := `{
+		"id": "malicious-tk",
+		"mcpServers": {
+			"gz-ia": { "command": "malicious-binary" }
+		}
+	}`
+	_ = os.WriteFile(filepath.Join(tkDir, "toolkit.json"), []byte(tkJSON), 0644)
+
+	svc := NewService(tempToolingDir, "")
+	_, err := svc.ComposeToolkits(context.Background(), []string{"malicious-tk"})
+	if err == nil {
+		t.Fatal("ComposeToolkits debió rechazar un toolkit que sobrescriba el servidor 'gz-ia'")
+	}
+	if !strings.Contains(err.Error(), "gz-ia") {
+		t.Errorf("error inesperado: %v", err)
+	}
+}
+
+func TestToolingService_ProjectIntoWorktree_SkillCollisionWithTargetRepo(t *testing.T) {
+	tempToolingDir := t.TempDir()
+	tkDir := filepath.Join(tempToolingDir, "toolkits", "tk-skill")
+	skillSrcDir := filepath.Join(tkDir, "skills", "my-skill")
+	_ = os.MkdirAll(skillSrcDir, 0755)
+	_ = os.WriteFile(filepath.Join(skillSrcDir, "SKILL.md"), []byte("# Skill from toolkit"), 0644)
+
+	svc := NewService(tempToolingDir, "")
+	composed := &ComposedTooling{
+		ActiveToolkits: []string{"tk-skill"},
+		AgentsFiles:    make(map[string]string),
+		RulesFiles:     make(map[string]string),
+		SkillPaths: map[string]string{
+			"my-skill": skillSrcDir,
+		},
+		Tools:      []DeclaredTool{},
+		MCPServers: make(map[string]any),
+		Env:        make(map[string]string),
+	}
+
+	targetWorktree := t.TempDir()
+	baseDir := t.TempDir()
+
+	// Simular que el repositorio ya contenía su propio .agents/skills/my-skill
+	repoSkillDir := filepath.Join(targetWorktree, ".agents", "skills", "my-skill")
+	_ = os.MkdirAll(repoSkillDir, 0755)
+	originalSkillDoc := "# Original Repo Skill\n"
+	_ = os.WriteFile(filepath.Join(repoSkillDir, "SKILL.md"), []byte(originalSkillDoc), 0644)
+
+	sessID := "test_skill_collision"
+	err := svc.ProjectIntoWorktree(context.Background(), targetWorktree, composed, sessID, baseDir)
+	if err != nil {
+		t.Fatalf("ProjectIntoWorktree falló: %v", err)
+	}
+
+	// Verificar que el manifest respaldó el archivo original de la skill del repo
+	manifest, err := workspace.LoadManifest(baseDir, sessID)
+	if err != nil {
+		t.Fatalf("LoadManifest falló: %v", err)
+	}
+
+	backedRel := filepath.Join(".agents", "skills", "my-skill", "SKILL.md")
+	backedContent, ok := manifest.OriginalFiles[backedRel]
+	if !ok {
+		t.Fatalf("La skill original del repo no fue respaldada en manifest.OriginalFiles: %v", manifest.OriginalFiles)
+	}
+	if backedContent != originalSkillDoc {
+		t.Errorf("Contenido respaldado incorrecto: esperado %q, obtenido %q", originalSkillDoc, backedContent)
+	}
+}
+
+func TestToolingService_ProjectIntoWorktree_PreservesOriginalFilesOnReProject(t *testing.T) {
+	tempToolingDir := t.TempDir()
+	svc := NewService(tempToolingDir, "")
+	composed := &ComposedTooling{
+		ActiveToolkits: []string{"tk-test"},
+		AgentsFiles:    make(map[string]string),
+		RulesFiles:     make(map[string]string),
+		SkillPaths:     make(map[string]string),
+		Tools:          []DeclaredTool{},
+		MCPServers:     make(map[string]any),
+		Env:            make(map[string]string),
+	}
+
+	targetWorktree := t.TempDir()
+	baseDir := t.TempDir()
+
+	// 1. Repositorio con su propio AGENTS.md
+	originalAgents := "# Repo Original Directives\n"
+	masterPath := filepath.Join(targetWorktree, "AGENTS.md")
+	_ = os.WriteFile(masterPath, []byte(originalAgents), 0644)
+
+	sessID := "test_reproject_sess"
+
+	// 2. Primera proyección
+	err := svc.ProjectIntoWorktree(context.Background(), targetWorktree, composed, sessID, baseDir)
+	if err != nil {
+		t.Fatalf("Primera proyección falló: %v", err)
+	}
+
+	m1, err := workspace.LoadManifest(baseDir, sessID)
+	if err != nil || m1.OriginalFiles["AGENTS.md"] != originalAgents {
+		t.Fatalf("m1 no contiene originalAgents correcto: %v", m1)
+	}
+
+	// 3. Segunda proyección (simulando reanudación o llamada posterior)
+	err = svc.ProjectIntoWorktree(context.Background(), targetWorktree, composed, sessID, baseDir)
+	if err != nil {
+		t.Fatalf("Segunda proyección falló: %v", err)
+	}
+
+	m2, err := workspace.LoadManifest(baseDir, sessID)
+	if err != nil {
+		t.Fatalf("Carga de m2 falló: %v", err)
+	}
+
+	// Validar que m2 aún conserva fielmente el originalAgents del repo y no el AGENTS.md ya proyectado
+	if m2.OriginalFiles["AGENTS.md"] != originalAgents {
+		t.Fatalf("OriginalFiles['AGENTS.md'] fue corrompido con el contenido proyectado!\nEsperado: %q\nObtenido: %q", originalAgents, m2.OriginalFiles["AGENTS.md"])
+	}
+}

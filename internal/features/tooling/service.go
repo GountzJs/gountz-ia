@@ -15,14 +15,24 @@ import (
 	"gz-ia/packages/orchy/tools"
 )
 
-// Service define el contrato de operaciones para el ecosistema de tooling y perfiles modulares.
+// Service define el contrato de operaciones para el ecosistema de tooling y perfiles/presets modulares.
 type Service interface {
-	ListProfiles(ctx context.Context) ([]ProfileConfig, error)
-	GetProfile(ctx context.Context, name string) (*ProfileConfig, error)
+	ListToolkits(ctx context.Context) ([]Toolkit, error)
+	GetToolkit(ctx context.Context, id string) (*Toolkit, error)
+	CreateToolkit(ctx context.Context, req CreateToolkitRequest) (*Toolkit, error)
+	ListSkills(ctx context.Context) ([]SkillInfo, error)
+	ListPresets(ctx context.Context) ([]Preset, error)
+	GetPreset(ctx context.Context, name string) (*Preset, error)
+	ResolveToolkits(ctx context.Context, names []string) ([]string, error)
 	ComposeToolkits(ctx context.Context, toolkitIDs []string) (*ComposedTooling, error)
 	RegisterToolsInKernel(ctx context.Context, kernel *orchy.Kernel, tooling *ComposedTooling, workDir string) error
 	ProjectIntoWorktree(ctx context.Context, targetDir string, composed *ComposedTooling, sessionID string, baseDir ...string) error
 	ToolingDir() string
+	ProjectDir() string
+
+	// Métodos de compatibilidad histórica
+	ListProfiles(ctx context.Context) ([]ProfileConfig, error)
+	GetProfile(ctx context.Context, name string) (*ProfileConfig, error)
 }
 
 type toolingService struct {
@@ -30,13 +40,18 @@ type toolingService struct {
 }
 
 // NewService crea un nuevo servicio de tooling con el loader configurado.
-func NewService(toolingDir ...string) Service {
-	dir := ""
-	if len(toolingDir) > 0 && toolingDir[0] != "" {
-		dir = toolingDir[0]
+// Admite parámetros opcionales: toolingDir (global) y projectDir.
+func NewService(dirs ...string) Service {
+	toolingDir := ""
+	projectDir := ""
+	if len(dirs) > 0 && dirs[0] != "" {
+		toolingDir = dirs[0]
+	}
+	if len(dirs) > 1 && dirs[1] != "" {
+		projectDir = dirs[1]
 	}
 	return &toolingService{
-		loader: NewLoader(dir),
+		loader: NewLoader(toolingDir, projectDir),
 	}
 }
 
@@ -44,29 +59,107 @@ func (s *toolingService) ToolingDir() string {
 	return s.loader.ToolingDir()
 }
 
-// ListProfiles retorna la lista de perfiles declarados en config.json.
-func (s *toolingService) ListProfiles(ctx context.Context) ([]ProfileConfig, error) {
+func (s *toolingService) ProjectDir() string {
+	return s.loader.ProjectDir()
+}
+
+// ListToolkits descubre todos los toolkits disponibles en el proyecto y entorno global.
+func (s *toolingService) ListToolkits(ctx context.Context) ([]Toolkit, error) {
+	return s.loader.ListToolkits()
+}
+
+// GetToolkit busca un toolkit por su ID.
+func (s *toolingService) GetToolkit(ctx context.Context, id string) (*Toolkit, error) {
+	return s.loader.LoadToolkit(id)
+}
+
+// CreateToolkit genera el scaffolding completo para un nuevo toolkit.
+func (s *toolingService) CreateToolkit(ctx context.Context, req CreateToolkitRequest) (*Toolkit, error) {
+	return s.loader.CreateToolkitScaffold(req)
+}
+
+// ListSkills lista todas las habilidades descubiertas en toolkits y catálogos.
+func (s *toolingService) ListSkills(ctx context.Context) ([]SkillInfo, error) {
+	return s.loader.ListSkills()
+}
+
+// ListPresets retorna la lista de presets declarados en config.json.
+func (s *toolingService) ListPresets(ctx context.Context) ([]Preset, error) {
 	cfg, err := s.loader.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
+	if len(cfg.Presets) > 0 {
+		return cfg.Presets, nil
+	}
 	return cfg.Perfiles, nil
 }
 
-// GetProfile busca un perfil por nombre exacto o normalizado.
-func (s *toolingService) GetProfile(ctx context.Context, name string) (*ProfileConfig, error) {
+// GetPreset busca un preset por nombre exacto o normalizado (case-insensitive).
+func (s *toolingService) GetPreset(ctx context.Context, name string) (*Preset, error) {
 	clean := strings.TrimSpace(strings.ToLower(name))
-	profiles, err := s.ListProfiles(ctx)
+	presets, err := s.ListPresets(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, p := range profiles {
+	for _, p := range presets {
 		if strings.ToLower(p.Name) == clean {
 			return &p, nil
 		}
 	}
-	return nil, fmt.Errorf("perfil de tooling '%s' no encontrado en %s", name, s.loader.ToolingDir())
+	return nil, fmt.Errorf("preset de tooling '%s' no encontrado", name)
+}
+
+// ResolveToolkits toma una lista de identificadores (que pueden ser presets o toolkits) y retorna
+// la lista unificada y deduplicada de toolkit IDs listos para composición.
+func (s *toolingService) ResolveToolkits(ctx context.Context, names []string) ([]string, error) {
+	var resolved []string
+	seen := make(map[string]bool)
+
+	for _, raw := range names {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+
+		// 1. Probar si coincide con un Preset
+		preset, err := s.GetPreset(ctx, name)
+		if err == nil && preset != nil {
+			for _, tkID := range preset.Toolkits {
+				cleanTK := strings.TrimSpace(tkID)
+				if cleanTK != "" && !seen[cleanTK] {
+					seen[cleanTK] = true
+					resolved = append(resolved, cleanTK)
+				}
+			}
+			continue
+		}
+
+		// 2. Probar si coincide directamente con un Toolkit
+		tk, err := s.GetToolkit(ctx, name)
+		if err == nil && tk != nil {
+			if !seen[tk.ID] {
+				seen[tk.ID] = true
+				resolved = append(resolved, tk.ID)
+			}
+			continue
+		}
+
+		return nil, fmt.Errorf("no se encontró ningún preset ni toolkit con el identificador '%s'", name)
+	}
+
+	return resolved, nil
+}
+
+// ListProfiles mantiene compatibilidad histórica delegando en ListPresets.
+func (s *toolingService) ListProfiles(ctx context.Context) ([]ProfileConfig, error) {
+	return s.ListPresets(ctx)
+}
+
+// GetProfile mantiene compatibilidad histórica delegando en GetPreset.
+func (s *toolingService) GetProfile(ctx context.Context, name string) (*ProfileConfig, error) {
+	return s.GetPreset(ctx, name)
 }
 
 // ComposeToolkits unifica las directivas, reglas, skills y herramientas de los toolkits solicitados.
@@ -135,6 +228,9 @@ func (s *toolingService) ComposeToolkits(ctx context.Context, toolkitIDs []strin
 
 		// 5. Servidores MCP
 		for srvName, srvDef := range tk.MCPServers {
+			if srvName == "gz-ia" {
+				return nil, fmt.Errorf("el servidor MCP 'gz-ia' está reservado para uso interno y no puede ser definido por un toolkit")
+			}
 			if existingDef, conflict := composed.MCPServers[srvName]; conflict {
 				if !reflect.DeepEqual(existingDef, srvDef) {
 					return nil, fmt.Errorf("colisión de servidores MCP en tooling: el servidor '%s' está definido con configuraciones distintas", srvName)
@@ -180,22 +276,109 @@ func (s *toolingService) ProjectIntoWorktree(ctx context.Context, targetDir stri
 		return nil
 	}
 
+	var base string
+	if len(baseDir) > 0 && baseDir[0] != "" {
+		base = baseDir[0]
+	}
+
 	manifest := workspace.NewManifest(sessionID)
+	var prevManifest *workspace.Manifest
+	if base != "" {
+		if loaded, err := workspace.LoadManifest(base, sessionID); err == nil && loaded != nil {
+			prevManifest = loaded
+			for k, v := range loaded.OriginalFiles {
+				manifest.OriginalFiles[k] = v
+			}
+			for _, cf := range loaded.CreatedFiles {
+				manifest.CreatedFiles = append(manifest.CreatedFiles, cf)
+			}
+		}
+	}
 
 	// 1. Proyectar Skills en .agents/skills/
 	if len(composed.SkillPaths) > 0 {
 		skillsDir := filepath.Join(targetDir, ".agents", "skills")
-		_ = os.MkdirAll(skillsDir, 0755)
+		if err := os.MkdirAll(skillsDir, 0755); err != nil {
+			return fmt.Errorf("error creando directorio de skills %s: %w", skillsDir, err)
+		}
 
 		for skillName, srcPath := range composed.SkillPaths {
 			relPath := filepath.Join(".agents", "skills", skillName)
 			dstPath := filepath.Join(targetDir, relPath)
-			if _, statErr := os.Lstat(dstPath); os.IsNotExist(statErr) {
-				manifest.CreatedFiles = append(manifest.CreatedFiles, relPath)
+
+			if fi, statErr := os.Lstat(dstPath); statErr == nil {
+				// Ya existía en target
+				isAlreadyCreated := false
+				if prevManifest != nil {
+					for _, cf := range prevManifest.CreatedFiles {
+						if cf == relPath {
+							isAlreadyCreated = true
+							break
+						}
+					}
+				}
+				if !isAlreadyCreated {
+					// Skill original del repositorio del usuario: respaldar antes de tocar
+					if fi.IsDir() {
+						_ = filepath.Walk(dstPath, func(path string, info os.FileInfo, err error) error {
+							if err != nil || info.IsDir() {
+								return nil
+							}
+							subRel, rErr := filepath.Rel(targetDir, path)
+							if rErr == nil {
+								if _, backed := manifest.OriginalFiles[subRel]; !backed {
+									if data, rErr := os.ReadFile(path); rErr == nil {
+										manifest.OriginalFiles[subRel] = string(data)
+									}
+								}
+							}
+							return nil
+						})
+					} else {
+						if _, backed := manifest.OriginalFiles[relPath]; !backed {
+							if data, rErr := os.ReadFile(dstPath); rErr == nil {
+								manifest.OriginalFiles[relPath] = string(data)
+							}
+						}
+					}
+				}
+				if err := os.RemoveAll(dstPath); err != nil {
+					return fmt.Errorf("error limpiando skill previa en %s: %w", dstPath, err)
+				}
+			} else {
+				alreadyCreated := false
+				for _, cf := range manifest.CreatedFiles {
+					if cf == relPath {
+						alreadyCreated = true
+						break
+					}
+				}
+				if !alreadyCreated {
+					manifest.CreatedFiles = append(manifest.CreatedFiles, relPath)
+				}
 			}
-			_ = os.Remove(dstPath)
+
 			if err := os.Symlink(srcPath, dstPath); err != nil {
-				_ = copyDir(srcPath, dstPath)
+				if err := copyDir(srcPath, dstPath); err != nil {
+					return fmt.Errorf("error copiando skill %s: %w", skillName, err)
+				}
+			}
+
+			// Tracking de hash para revertir limpiamente
+			_ = filepath.Walk(dstPath, func(path string, info os.FileInfo, err error) error {
+				if err != nil || info.IsDir() {
+					return nil
+				}
+				subRel, rErr := filepath.Rel(targetDir, path)
+				if rErr == nil {
+					if data, rErr := os.ReadFile(path); rErr == nil {
+						manifest.ProjectedHash[subRel] = workspace.HashBytes(data)
+					}
+				}
+				return nil
+			})
+			if linkTarget, err := os.Readlink(dstPath); err == nil {
+				manifest.ProjectedHash[relPath] = workspace.HashBytes([]byte(linkTarget))
 			}
 		}
 	}
@@ -203,50 +386,93 @@ func (s *toolingService) ProjectIntoWorktree(ctx context.Context, targetDir stri
 	// 2. Proyectar Reglas en .agents/rules/
 	if len(composed.RulesFiles) > 0 {
 		rulesDir := filepath.Join(targetDir, ".agents", "rules")
-		_ = os.MkdirAll(rulesDir, 0755)
+		if err := os.MkdirAll(rulesDir, 0755); err != nil {
+			return fmt.Errorf("error creando directorio de reglas %s: %w", rulesDir, err)
+		}
 
 		for ruleFilename, srcPath := range composed.RulesFiles {
 			relPath := filepath.Join(".agents", "rules", ruleFilename)
 			dstPath := filepath.Join(targetDir, relPath)
-			if origBytes, err := os.ReadFile(dstPath); err == nil {
-				manifest.OriginalFiles[relPath] = string(origBytes)
-			} else {
-				manifest.CreatedFiles = append(manifest.CreatedFiles, relPath)
+			if _, ok := manifest.OriginalFiles[relPath]; !ok {
+				if origBytes, err := os.ReadFile(dstPath); err == nil {
+					manifest.OriginalFiles[relPath] = string(origBytes)
+				} else {
+					manifest.CreatedFiles = append(manifest.CreatedFiles, relPath)
+				}
 			}
-			_ = copyFile(srcPath, dstPath)
-			if data, err := os.ReadFile(dstPath); err == nil {
-				manifest.ProjectedHash[relPath] = workspace.HashBytes(data)
+			if err := copyFile(srcPath, dstPath); err != nil {
+				return fmt.Errorf("error copiando regla %s: %w", ruleFilename, err)
 			}
+			data, err := os.ReadFile(dstPath)
+			if err != nil {
+				return fmt.Errorf("error leyendo regla proyectada %s: %w", ruleFilename, err)
+			}
+			manifest.ProjectedHash[relPath] = workspace.HashBytes(data)
 		}
 	}
 
 	// 3. Proyectar directivas de toolkits individuales (ej. TOOLKIT_COMMON-AGENTS.md)
 	for targetFilename, srcPath := range composed.AgentsFiles {
 		dstPath := filepath.Join(targetDir, targetFilename)
-		if origBytes, err := os.ReadFile(dstPath); err == nil {
-			manifest.OriginalFiles[targetFilename] = string(origBytes)
-		} else {
-			manifest.CreatedFiles = append(manifest.CreatedFiles, targetFilename)
+		if _, ok := manifest.OriginalFiles[targetFilename]; !ok {
+			if origBytes, err := os.ReadFile(dstPath); err == nil {
+				manifest.OriginalFiles[targetFilename] = string(origBytes)
+			} else {
+				manifest.CreatedFiles = append(manifest.CreatedFiles, targetFilename)
+			}
 		}
-		_ = copyFile(srcPath, dstPath)
-		if data, err := os.ReadFile(dstPath); err == nil {
-			manifest.ProjectedHash[targetFilename] = workspace.HashBytes(data)
+		if err := copyFile(srcPath, dstPath); err != nil {
+			return fmt.Errorf("error copiando directiva %s: %w", targetFilename, err)
 		}
+		data, err := os.ReadFile(dstPath)
+		if err != nil {
+			return fmt.Errorf("error leyendo directiva proyectada %s: %w", targetFilename, err)
+		}
+		manifest.ProjectedHash[targetFilename] = workspace.HashBytes(data)
 	}
 
 	// 4. Redactar el AGENTS.md maestro unificado preservando reglas previas del proyecto si existían
 	masterPath := filepath.Join(targetDir, "AGENTS.md")
 	masterContent := generateMasterAgentsMarkdown(composed, sessionID)
-	if origBytes, err := os.ReadFile(masterPath); err == nil {
-		manifest.OriginalFiles["AGENTS.md"] = string(origBytes)
-		fullContent := fmt.Sprintf("# 📌 Reglas Originales del Proyecto\n\n%s\n\n---\n\n%s", strings.TrimSpace(string(origBytes)), masterContent)
-		_ = os.WriteFile(masterPath, []byte(fullContent), 0644)
-		manifest.ProjectedHash["AGENTS.md"] = workspace.HashBytes([]byte(fullContent))
-	} else {
-		manifest.CreatedFiles = append(manifest.CreatedFiles, "AGENTS.md")
-		_ = os.WriteFile(masterPath, []byte(masterContent), 0644)
-		manifest.ProjectedHash["AGENTS.md"] = workspace.HashBytes([]byte(masterContent))
+
+	var origContent string
+	hasOriginal := false
+	if prevManifest != nil {
+		if prevOrig, ok := prevManifest.OriginalFiles["AGENTS.md"]; ok {
+			origContent = prevOrig
+			hasOriginal = true
+		}
 	}
+	if !hasOriginal {
+		if origBytes, err := os.ReadFile(masterPath); err == nil {
+			origContent = string(origBytes)
+			hasOriginal = true
+			manifest.OriginalFiles["AGENTS.md"] = origContent
+		} else {
+			alreadyCreated := false
+			for _, cf := range manifest.CreatedFiles {
+				if cf == "AGENTS.md" {
+					alreadyCreated = true
+					break
+				}
+			}
+			if !alreadyCreated {
+				manifest.CreatedFiles = append(manifest.CreatedFiles, "AGENTS.md")
+			}
+		}
+	}
+
+	var fullContent string
+	if hasOriginal && strings.TrimSpace(origContent) != "" {
+		fullContent = fmt.Sprintf("# 📌 Reglas Originales del Proyecto\n\n%s\n\n---\n\n%s", strings.TrimSpace(origContent), masterContent)
+	} else {
+		fullContent = masterContent
+	}
+
+	if err := os.WriteFile(masterPath, []byte(fullContent), 0644); err != nil {
+		return fmt.Errorf("error escribiendo AGENTS.md maestro: %w", err)
+	}
+	manifest.ProjectedHash["AGENTS.md"] = workspace.HashBytes([]byte(fullContent))
 
 	// 5. Configurar servidores MCP integrando gz-ia y servidores del proyecto/toolkits
 	mcpConfig := map[string]any{
@@ -264,22 +490,50 @@ func (s *toolingService) ProjectIntoWorktree(ctx context.Context, targetDir stri
 	if len(composed.MCPServers) > 0 {
 		serversMap := mcpConfig["mcpServers"].(map[string]any)
 		for k, v := range composed.MCPServers {
-			serversMap[k] = v
+			if k != "gz-ia" {
+				serversMap[k] = v
+			}
 		}
 	}
 
-	mergeAndWriteMCP := func(relPath string) {
+	mergeAndWriteMCP := func(relPath string) error {
 		dstPath := filepath.Join(targetDir, relPath)
-		_ = os.MkdirAll(filepath.Dir(dstPath), 0755)
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+			return fmt.Errorf("error creando directorio para %s: %w", relPath, err)
+		}
 
 		var targetMap map[string]any
-		if origBytes, err := os.ReadFile(dstPath); err == nil {
-			manifest.OriginalFiles[relPath] = string(origBytes)
+		var origBytes []byte
+		var readErr error
+
+		if prevManifest != nil {
+			if prevOrig, ok := prevManifest.OriginalFiles[relPath]; ok {
+				origBytes = []byte(prevOrig)
+			} else {
+				origBytes, readErr = os.ReadFile(dstPath)
+			}
+		} else {
+			origBytes, readErr = os.ReadFile(dstPath)
+		}
+
+		if readErr == nil && len(origBytes) > 0 {
+			if _, ok := manifest.OriginalFiles[relPath]; !ok {
+				manifest.OriginalFiles[relPath] = string(origBytes)
+			}
 			if err := json.Unmarshal(origBytes, &targetMap); err != nil {
 				targetMap = make(map[string]any)
 			}
 		} else {
-			manifest.CreatedFiles = append(manifest.CreatedFiles, relPath)
+			alreadyTracked := false
+			for _, cf := range manifest.CreatedFiles {
+				if cf == relPath {
+					alreadyTracked = true
+					break
+				}
+			}
+			if !alreadyTracked {
+				manifest.CreatedFiles = append(manifest.CreatedFiles, relPath)
+			}
 			targetMap = make(map[string]any)
 		}
 
@@ -294,18 +548,28 @@ func (s *toolingService) ProjectIntoWorktree(ctx context.Context, targetDir stri
 		targetMap["mcpServers"] = existingServers
 
 		mergedData, err := json.MarshalIndent(targetMap, "", "  ")
-		if err == nil {
-			_ = os.WriteFile(dstPath, mergedData, 0644)
-			manifest.ProjectedHash[relPath] = workspace.HashBytes(mergedData)
+		if err != nil {
+			return fmt.Errorf("error codificando JSON para %s: %w", relPath, err)
 		}
+		if err := os.WriteFile(dstPath, mergedData, 0644); err != nil {
+			return fmt.Errorf("error escribiendo %s: %w", relPath, err)
+		}
+		manifest.ProjectedHash[relPath] = workspace.HashBytes(mergedData)
+		return nil
 	}
 
-	mergeAndWriteMCP(filepath.Join(".agents", "mcp_config.json"))
-	mergeAndWriteMCP(".mcp.json")
+	if err := mergeAndWriteMCP(filepath.Join(".agents", "mcp_config.json")); err != nil {
+		return err
+	}
+	if err := mergeAndWriteMCP(".mcp.json"); err != nil {
+		return err
+	}
 
 	// Persistir el manifiesto en baseDir si fue suministrado
-	if len(baseDir) > 0 && baseDir[0] != "" {
-		_ = workspace.SaveManifest(baseDir[0], manifest)
+	if base != "" {
+		if err := workspace.SaveManifest(base, manifest); err != nil {
+			return fmt.Errorf("falló al guardar manifiesto de sesión: %w", err)
+		}
 	}
 
 	return nil

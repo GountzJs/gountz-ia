@@ -11,7 +11,7 @@ import (
 )
 
 type mockGitClient struct {
-	lookPathErr error
+	lookPathErr  error
 	runResponses map[string]string // key: args joined
 	runErrors    map[string]error
 	calls        [][]string
@@ -1010,7 +1010,6 @@ func TestGitProvider_MergeWorktree_UntrackedBaseDir_Allowed(t *testing.T) {
 	}
 }
 
-
 func TestGitProvider_EnsureGitExcludeHarness(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git no disponible para test")
@@ -1295,15 +1294,12 @@ func TestGitProvider_MergeWorktree_AgentIntentionalEditsPreserved(t *testing.T) 
 		t.Fatalf("MergeWorktree falló: %v", mergeErr)
 	}
 
-	// Verificar que la edición intencional del agente en AGENTS.md SE PRESERVÓ
+	// Verificar que el archivo proyectado editado por el agente fue restaurado al original del proyecto para evitar fuga de basura/wrappers
 	finalAgents, err := os.ReadFile(filepath.Join(tmpDir, "AGENTS.md"))
 	if err != nil {
 		t.Fatalf("error leyendo AGENTS.md: %v", err)
 	}
-	if string(finalAgents) != agentEditedAgents {
-		t.Errorf("la edición intencional del agente en AGENTS.md se perdió!\nEsperado: %q\nObtenido: %q", agentEditedAgents, string(finalAgents))
+	if string(finalAgents) != originalAgents {
+		t.Errorf("la edición en AGENTS.md no fue revertida al original!\nEsperado: %q\nObtenido: %q", originalAgents, string(finalAgents))
 	}
 }
-
-
-

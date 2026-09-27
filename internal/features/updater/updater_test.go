@@ -2,15 +2,19 @@ package updater
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -349,5 +353,156 @@ func TestConfig_EnvOverrides(t *testing.T) {
 	}
 	if svc.cfg.DownloadBaseURL != "https://dl.github.test/releases" {
 		t.Errorf("DownloadBaseURL esperada sin slash al final: %s, obtenida: %s", "https://dl.github.test/releases", svc.cfg.DownloadBaseURL)
+	}
+}
+
+func TestUpdate_ZipAndExe(t *testing.T) {
+	targetVer := "1.4.0"
+	goos := runtime.GOOS
+	goarch := runtime.GOARCH
+
+	// Crear archivo zip sintético en memoria conteniendo gz-ia.exe
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create(fmt.Sprintf("gz-ia_%s_%s_%s/gz-ia.exe", targetVer, goos, goarch))
+	if err != nil {
+		t.Fatalf("error creando entrada zip: %v", err)
+	}
+	_, _ = w.Write([]byte("binary-exe-content"))
+	zw.Close()
+
+	downloadServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		w.Write(buf.Bytes())
+	}))
+	defer downloadServer.Close()
+
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{
+			"tag_name": "v1.4.0",
+			"name": "Release v1.4.0",
+			"assets": [
+				{
+					"name": "gz-ia_1.4.0_%s_%s.tar.gz",
+					"browser_download_url": "%s/v1.4.0/gz-ia_1.4.0_%s_%s.zip"
+				}
+			]
+		}`, goos, goarch, downloadServer.URL, goos, goarch)
+	}))
+	defer ghServer.Close()
+
+	tempInstallDir := t.TempDir()
+	svc := NewService(Config{
+		GitHubAPIURL:    ghServer.URL,
+		DownloadBaseURL: downloadServer.URL,
+	})
+
+	res, err := svc.Update(context.Background(), "", tempInstallDir)
+	if err != nil {
+		t.Fatalf("Update con zip y exe falló: %v", err)
+	}
+
+	if len(res.InstalledBinaries) != 1 || res.InstalledBinaries[0] != "gz-ia.exe" {
+		t.Fatalf("se esperaba 'gz-ia.exe' instalado, obtenido: %v", res.InstalledBinaries)
+	}
+
+	installedPath := filepath.Join(tempInstallDir, "gz-ia.exe")
+	if _, err := os.Stat(installedPath); err != nil {
+		t.Fatalf("el ejecutable instalado no se encontró en %s: %v", installedPath, err)
+	}
+}
+
+func TestUpdate_ChecksumsVerification_Success(t *testing.T) {
+	targetVer := "1.5.0"
+	goos := runtime.GOOS
+	goarch := runtime.GOARCH
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	hdr := &tar.Header{
+		Name: fmt.Sprintf("gz-ia_%s_%s_%s/gz-ia", targetVer, goos, goarch),
+		Mode: 0755,
+		Size: int64(len("content")),
+	}
+	_ = tw.WriteHeader(hdr)
+	_, _ = tw.Write([]byte("content"))
+	tw.Close()
+	gw.Close()
+
+	pkgBytes := buf.Bytes()
+	hashBytes := sha256.Sum256(pkgBytes)
+	shaHex := hex.EncodeToString(hashBytes[:])
+	archiveName := fmt.Sprintf("gz-ia_%s_%s_%s.tar.gz", targetVer, goos, goarch)
+
+	checksumsContent := fmt.Sprintf("%s  %s\n", shaHex, archiveName)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
+			w.Write([]byte(checksumsContent))
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-gzip")
+		w.Write(pkgBytes)
+	}))
+	defer server.Close()
+
+	tempInstallDir := t.TempDir()
+	svc := NewService(Config{
+		DownloadBaseURL: server.URL,
+	})
+
+	res, err := svc.Update(context.Background(), targetVer, tempInstallDir)
+	if err != nil {
+		t.Fatalf("Update con checksums válido falló: %v", err)
+	}
+	if res.Version != targetVer {
+		t.Errorf("versión esperada %s, obtenida %s", targetVer, res.Version)
+	}
+}
+
+func TestUpdate_ChecksumsVerification_Mismatch(t *testing.T) {
+	targetVer := "1.6.0"
+	goos := runtime.GOOS
+	goarch := runtime.GOARCH
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	hdr := &tar.Header{
+		Name: fmt.Sprintf("gz-ia_%s_%s_%s/gz-ia", targetVer, goos, goarch),
+		Mode: 0755,
+		Size: int64(len("content")),
+	}
+	_ = tw.WriteHeader(hdr)
+	_, _ = tw.Write([]byte("content"))
+	tw.Close()
+	gw.Close()
+
+	archiveName := fmt.Sprintf("gz-ia_%s_%s_%s.tar.gz", targetVer, goos, goarch)
+	checksumsContent := fmt.Sprintf("0000000000000000000000000000000000000000000000000000000000000000  %s\n", archiveName)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
+			w.Write([]byte(checksumsContent))
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-gzip")
+		w.Write(buf.Bytes())
+	}))
+	defer server.Close()
+
+	tempInstallDir := t.TempDir()
+	svc := NewService(Config{
+		DownloadBaseURL: server.URL,
+	})
+
+	_, err := svc.Update(context.Background(), targetVer, tempInstallDir)
+	if err == nil {
+		t.Fatal("Update debió fallar por discrepancia de checksum SHA-256")
+	}
+	if !strings.Contains(err.Error(), "SHA-256 fallida") {
+		t.Errorf("error inesperado: %v", err)
 	}
 }

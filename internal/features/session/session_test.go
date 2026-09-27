@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"gz-ia/internal/features/tooling"
 	"gz-ia/internal/features/workspace"
 	"os"
 	"reflect"
@@ -493,3 +494,158 @@ func TestSessionStart_WorkspacePrepError(t *testing.T) {
 	}
 }
 
+type mockToolingService struct {
+	tooling.Service
+	resolveToolkitsFunc func(ctx context.Context, names []string) ([]string, error)
+	composeToolkitsFunc func(ctx context.Context, ids []string) (*tooling.ComposedTooling, error)
+	getPresetFunc       func(ctx context.Context, name string) (*tooling.Preset, error)
+	projectWorktreeFunc func(ctx context.Context, targetDir string, composed *tooling.ComposedTooling, sessionID string, baseDir ...string) error
+	projectCalled       bool
+}
+
+func (m *mockToolingService) ResolveToolkits(ctx context.Context, names []string) ([]string, error) {
+	if m.resolveToolkitsFunc != nil {
+		return m.resolveToolkitsFunc(ctx, names)
+	}
+	return names, nil
+}
+
+func (m *mockToolingService) ComposeToolkits(ctx context.Context, ids []string) (*tooling.ComposedTooling, error) {
+	if m.composeToolkitsFunc != nil {
+		return m.composeToolkitsFunc(ctx, ids)
+	}
+	return &tooling.ComposedTooling{
+		ActiveToolkits: ids,
+		AgentsFiles:    make(map[string]string),
+		RulesFiles:     make(map[string]string),
+		SkillPaths:     make(map[string]string),
+		Tools:          nil,
+		MCPServers:     make(map[string]any),
+		Env:            make(map[string]string),
+	}, nil
+}
+
+func (m *mockToolingService) GetPreset(ctx context.Context, name string) (*tooling.Preset, error) {
+	if m.getPresetFunc != nil {
+		return m.getPresetFunc(ctx, name)
+	}
+	return nil, errors.New("preset not found")
+}
+
+func (m *mockToolingService) ProjectIntoWorktree(ctx context.Context, targetDir string, composed *tooling.ComposedTooling, sessionID string, baseDir ...string) error {
+	m.projectCalled = true
+	if m.projectWorktreeFunc != nil {
+		return m.projectWorktreeFunc(ctx, targetDir, composed, sessionID, baseDir...)
+	}
+	return nil
+}
+
+func TestSessionStart_ResumeSkipsProjectingWhenManifestExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+	mockRun := &mockRunner{}
+	toolingMock := &mockToolingService{}
+
+	sessID := "resume_manifest_skip"
+	// Guardar un manifiesto previo
+	manifest := workspace.NewManifest(sessID)
+	if err := workspace.SaveManifest(tmpDir, manifest); err != nil {
+		t.Fatalf("SaveManifest falló: %v", err)
+	}
+
+	cfg := Config{
+		ID:         sessID,
+		WorkingDir: tmpDir,
+		Resume:     true,
+		Profiles:   []string{"base-profile"},
+	}
+
+	sess := New(cfg, mockRun, store).WithTooling(toolingMock)
+	err := sess.Start(context.Background())
+	if err != nil {
+		t.Fatalf("Start() falló: %v", err)
+	}
+
+	if toolingMock.projectCalled {
+		t.Error("ProjectIntoWorktree NO debió ser llamado al reanudar una sesión que ya tenía manifiesto")
+	}
+}
+
+func TestSessionStart_ToolkitPresetGzIaProtection(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+	mockRun := &mockRunner{}
+	toolingMock := &mockToolingService{
+		getPresetFunc: func(ctx context.Context, name string) (*tooling.Preset, error) {
+			return &tooling.Preset{
+				Name: name,
+				MCPServers: map[string]any{
+					"gz-ia": map[string]any{"command": "fake"},
+				},
+			}, nil
+		},
+	}
+
+	cfg := Config{
+		ID:         "prot_gzia_sess",
+		WorkingDir: tmpDir,
+		Profiles:   []string{"hack-profile"},
+	}
+
+	sess := New(cfg, mockRun, store).WithTooling(toolingMock)
+	err := sess.Start(context.Background())
+	if err == nil {
+		t.Fatal("Start debió fallar porque el preset intentó sobrescribir el servidor 'gz-ia'")
+	}
+	if !strings.Contains(err.Error(), "gz-ia") {
+		t.Errorf("error inesperado: %v", err)
+	}
+}
+
+func TestSessionStart_ToolkitPresetCollisions(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+	mockRun := &mockRunner{}
+
+	// 1. Colisión de Env
+	toolingMockEnv := &mockToolingService{
+		composeToolkitsFunc: func(ctx context.Context, ids []string) (*tooling.ComposedTooling, error) {
+			return &tooling.ComposedTooling{
+				Env: map[string]string{"API_KEY": "val1"},
+			}, nil
+		},
+		getPresetFunc: func(ctx context.Context, name string) (*tooling.Preset, error) {
+			return &tooling.Preset{
+				Name: name,
+				Env:  map[string]string{"API_KEY": "val2"},
+			}, nil
+		},
+	}
+
+	sessEnv := New(Config{ID: "coll_env", WorkingDir: tmpDir, Profiles: []string{"p1"}}, mockRun, store).WithTooling(toolingMockEnv)
+	err := sessEnv.Start(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "colisión de variables de entorno") {
+		t.Errorf("se esperaba error de colisión de variables de entorno, obtenido: %v", err)
+	}
+
+	// 2. Colisión de MCPServers
+	toolingMockMCP := &mockToolingService{
+		composeToolkitsFunc: func(ctx context.Context, ids []string) (*tooling.ComposedTooling, error) {
+			return &tooling.ComposedTooling{
+				MCPServers: map[string]any{"my-srv": "cfg1"},
+			}, nil
+		},
+		getPresetFunc: func(ctx context.Context, name string) (*tooling.Preset, error) {
+			return &tooling.Preset{
+				Name:       name,
+				MCPServers: map[string]any{"my-srv": "cfg2"},
+			}, nil
+		},
+	}
+
+	sessMCP := New(Config{ID: "coll_mcp", WorkingDir: tmpDir, Profiles: []string{"p1"}}, mockRun, store).WithTooling(toolingMockMCP)
+	err = sessMCP.Start(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "colisión de servidores MCP") {
+		t.Errorf("se esperaba error de colisión de servidores MCP, obtenido: %v", err)
+	}
+}

@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"gz-ia/internal/clients/tui"
-	"gz-ia/internal/features/profile"
 	"gz-ia/internal/features/vault"
 
 	"github.com/charmbracelet/huh"
@@ -181,18 +180,25 @@ func runVaultList(c *cobra.Command, workDir string) error {
 	targetDir := resolveWorkDir(c.Context(), workDir)
 	svc := getVaultService(targetDir)
 
-	// Extraer variables recomendadas por perfiles del proyecto si existen
-	var profileEnvs []string
-	profSvc := profile.NewService(profile.WithProjectDir(targetDir))
-	if profiles, err := profSvc.ListProfiles(c.Context()); err == nil {
-		for _, p := range profiles {
+	// Extraer variables recomendadas por toolkits y presets si existen
+	var recommendedEnvs []string
+	toolingSvc := getToolingService(targetDir)
+	if toolkits, err := toolingSvc.ListToolkits(c.Context()); err == nil {
+		for _, tk := range toolkits {
+			for k := range tk.Env {
+				recommendedEnvs = append(recommendedEnvs, k)
+			}
+		}
+	}
+	if presets, err := toolingSvc.ListPresets(c.Context()); err == nil {
+		for _, p := range presets {
 			for k := range p.Env {
-				profileEnvs = append(profileEnvs, k)
+				recommendedEnvs = append(recommendedEnvs, k)
 			}
 		}
 	}
 
-	statuses, err := svc.ListStatus(c.Context(), profileEnvs, "")
+	statuses, err := svc.ListStatus(c.Context(), recommendedEnvs, "")
 	if err != nil {
 		return err
 	}

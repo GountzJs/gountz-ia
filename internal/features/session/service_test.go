@@ -10,7 +10,7 @@ import (
 
 	"gz-ia/internal/features/logger"
 	"gz-ia/internal/features/metrics"
-	"gz-ia/internal/features/profile"
+	"gz-ia/internal/features/tooling"
 	"gz-ia/internal/features/vault"
 	"gz-ia/internal/features/workspace"
 )
@@ -964,13 +964,16 @@ func TestService_StartChat_WithProfiles(t *testing.T) {
 	store := NewFileStore(tmpDir)
 	runner := &mockServiceRunner{}
 
-	profSvc := profile.NewService(profile.WithProjectDir(tmpDir))
-	_, err := profSvc.CreateProfile(context.Background(), "frontend", "Frontend profile", "FRONT-AGENTS.md", false)
+	toolingSvc := tooling.NewService(filepath.Join(tmpDir, "tooling"), tmpDir)
+	_, err := toolingSvc.CreateToolkit(context.Background(), tooling.CreateToolkitRequest{
+		ID:          "frontend",
+		Description: "Frontend toolkit",
+	})
 	if err != nil {
-		t.Fatalf("CreateProfile falló: %v", err)
+		t.Fatalf("CreateToolkit falló: %v", err)
 	}
 
-	svc := NewService(tmpDir, WithStore(store), WithRunner(runner), WithProfile(profSvc))
+	svc := NewService(tmpDir, WithStore(store), WithRunner(runner), WithTooling(toolingSvc))
 
 	req := StartChatRequest{
 		ID:         "prof_sess_1",
@@ -981,7 +984,7 @@ func TestService_StartChat_WithProfiles(t *testing.T) {
 
 	err = svc.StartChat(context.Background(), req)
 	if err != nil {
-		t.Fatalf("StartChat con perfiles falló: %v", err)
+		t.Fatalf("StartChat con toolkits falló: %v", err)
 	}
 
 	rec, err := store.Get("prof_sess_1")
@@ -1026,5 +1029,3 @@ func TestService_Vault_Integration(t *testing.T) {
 		t.Errorf("La variable MY_CUSTOM_SECRET no fue inyectada en el runner")
 	}
 }
-
-

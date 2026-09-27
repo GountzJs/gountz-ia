@@ -75,6 +75,9 @@ func TestRootCmd_Help(t *testing.T) {
 	if !strings.Contains(out, "session") {
 		t.Errorf("la salida de ayuda no lista el comando 'session': %s", out)
 	}
+	if !strings.Contains(out, "toolkit") {
+		t.Errorf("la salida de ayuda no lista el comando 'toolkit': %s", out)
+	}
 	if !strings.Contains(out, "version") {
 		t.Errorf("la salida de ayuda no lista el comando 'version': %s", out)
 	}
@@ -2194,85 +2197,88 @@ func TestSessionCmd_Prune(t *testing.T) {
 	}
 }
 
-func TestProfileCmd_Lifecycle(t *testing.T) {
+func TestToolkitCmd_Lifecycle(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// 1. Profile list vacio
+	// 1. Toolkit list vacio
 	cmd := NewRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{"profile", "list", "--dir", tmpDir})
+	cmd.SetArgs([]string{"toolkit", "list", "--dir", tmpDir})
 	err := cmd.Execute()
 	if err != nil {
-		t.Fatalf("profile list falló: %v", err)
+		t.Fatalf("toolkit list falló: %v", err)
 	}
-	if !strings.Contains(buf.String(), "No hay perfiles agénticos") {
+	if !strings.Contains(buf.String(), "No hay toolkits ni presets") {
 		t.Errorf("salida inesperada: %s", buf.String())
 	}
 
-	// 2. Profile create
+	// 2. Toolkit create (o init)
 	cmd = NewRootCmd()
 	buf.Reset()
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{"profile", "create", "frontend", "--desc", "Frontend React/Vue", "--agents-file", "FRONT-AGENTS.md", "--dir", tmpDir})
+	cmd.SetArgs([]string{"toolkit", "create", "frontend", "--desc", "Frontend React/Vue", "--dir", tmpDir})
 	err = cmd.Execute()
 	if err != nil {
-		t.Fatalf("profile create falló: %v", err)
+		t.Fatalf("toolkit create falló: %v", err)
 	}
 	if !strings.Contains(buf.String(), "creado exitosamente") {
 		t.Errorf("salida inesperada en create: %s", buf.String())
 	}
 
-	// 3. Profile list con el perfil creado
+	// 3. Toolkit list con el toolkit creado
 	cmd = NewRootCmd()
 	buf.Reset()
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{"profile", "list", "--dir", tmpDir})
+	cmd.SetArgs([]string{"toolkit", "list", "--dir", tmpDir})
 	err = cmd.Execute()
 	if err != nil {
-		t.Fatalf("profile list falló: %v", err)
+		t.Fatalf("toolkit list falló: %v", err)
 	}
 	if !strings.Contains(buf.String(), "frontend") {
 		t.Errorf("se esperaba 'frontend' en list: %s", buf.String())
 	}
 
-	// 4. Profile show
+	// 4. Toolkit show
 	cmd = NewRootCmd()
 	buf.Reset()
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{"profile", "show", "frontend", "--dir", tmpDir})
+	cmd.SetArgs([]string{"toolkit", "show", "frontend", "--dir", tmpDir})
 	err = cmd.Execute()
 	if err != nil {
-		t.Fatalf("profile show falló: %v", err)
+		t.Fatalf("toolkit show falló: %v", err)
 	}
-	if !strings.Contains(buf.String(), "FRONT-AGENTS.md") {
-		t.Errorf("se esperaba FRONT-AGENTS.md en show: %s", buf.String())
+	if !strings.Contains(buf.String(), "AGENTS.md") {
+		t.Errorf("se esperaba AGENTS.md en show: %s", buf.String())
 	}
 
-	// 5. Profile path
+	// 5. Toolkit path
 	cmd = NewRootCmd()
 	buf.Reset()
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{"profile", "path", "frontend", "--dir", tmpDir})
+	cmd.SetArgs([]string{"toolkit", "path", "frontend", "--dir", tmpDir})
 	err = cmd.Execute()
 	if err != nil {
-		t.Fatalf("profile path falló: %v", err)
+		t.Fatalf("toolkit path falló: %v", err)
 	}
 	if !strings.Contains(buf.String(), "frontend") {
 		t.Errorf("salida de path inesperada: %s", buf.String())
 	}
 
-	// 6. Profile skills
+	// 6. Toolkit skills
 	cmd = NewRootCmd()
 	buf.Reset()
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{"profile", "skills", "--dir", tmpDir})
+	cmd.SetArgs([]string{"toolkit", "skills", "--dir", tmpDir})
 	err = cmd.Execute()
 	if err != nil {
-		t.Fatalf("profile skills falló: %v", err)
+		t.Fatalf("toolkit skills falló: %v", err)
+	}
+	if !strings.Contains(buf.String(), "example") {
+		t.Errorf("se esperaba 'example' skill en skills: %s", buf.String())
 	}
 
-	// 7. Chat with profile flag
+	// 7. Chat with -P flag
 	mockRunner := &mockSessionRunner{}
 	defaultSessionRunner = mockRunner
 	cmd = NewRootCmd()
@@ -2282,6 +2288,29 @@ func TestProfileCmd_Lifecycle(t *testing.T) {
 	err = cmd.Execute()
 	if err != nil {
 		t.Fatalf("chat -P falló: %v", err)
+	}
+
+	// 8. Chat with -T flag
+	cmd = NewRootCmd()
+	buf.Reset()
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"chat", "-T", "frontend", "--dir", tmpDir})
+	err = cmd.Execute()
+	if err != nil {
+		t.Fatalf("chat -T falló: %v", err)
+	}
+
+	// 9. Compatibilidad con alias profile list
+	cmd = NewRootCmd()
+	buf.Reset()
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"profile", "list", "--dir", tmpDir})
+	err = cmd.Execute()
+	if err != nil {
+		t.Fatalf("profile alias list falló: %v", err)
+	}
+	if !strings.Contains(buf.String(), "frontend") {
+		t.Errorf("se esperaba 'frontend' en alias profile list: %s", buf.String())
 	}
 }
 
@@ -2424,5 +2453,3 @@ func TestMcpCmd_Protocol(t *testing.T) {
 		t.Errorf("Se esperaba que tools/list incluyera 'test_mcp_echo', obtenido:\n%s", outStr)
 	}
 }
-
-

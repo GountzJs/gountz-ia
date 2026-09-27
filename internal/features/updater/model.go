@@ -11,12 +11,13 @@ const (
 
 // ReleaseInfo contiene la información de la última versión disponible en los repositorios.
 type ReleaseInfo struct {
-	Tag         string `json:"tag"`
-	Version     string `json:"version"`
-	CurrentVer  string `json:"current_version"`
-	IsNewer     bool   `json:"is_newer"`
-	DownloadURL string `json:"download_url"`
-	PackageName string `json:"package_name"`
+	Tag          string `json:"tag"`
+	Version      string `json:"version"`
+	CurrentVer   string `json:"current_version"`
+	IsNewer      bool   `json:"is_newer"`
+	DownloadURL  string `json:"download_url"`
+	PackageName  string `json:"package_name"`
+	ChecksumsURL string `json:"checksums_url,omitempty"`
 }
 
 // Config define las URLs y parámetros de conexión para el actualizador.

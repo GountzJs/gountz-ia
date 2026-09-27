@@ -11,7 +11,6 @@ import (
 
 	"gz-ia/internal/features/logger"
 	"gz-ia/internal/features/metrics"
-	"gz-ia/internal/features/profile"
 	"gz-ia/internal/features/tooling"
 	"gz-ia/internal/features/vault"
 	"gz-ia/internal/features/workspace"
@@ -72,7 +71,6 @@ type sessionService struct {
 	workspace workspace.Provider
 	metrics   metrics.Service
 	logger    logger.Service
-	profile   profile.Service
 	vault     vault.Service
 	tooling   tooling.Service
 }
@@ -136,13 +134,6 @@ func WithLogger(l logger.Service) Option {
 	}
 }
 
-// WithProfile inyecta un servicio de perfiles agénticos personalizado.
-func WithProfile(p profile.Service) Option {
-	return func(svc *sessionService) {
-		svc.profile = p
-	}
-}
-
 // NewService crea un nuevo servicio de sesión con dependencias inyectadas o valores por defecto limpios.
 func NewService(workDir string, opts ...Option) Service {
 	svc := &sessionService{
@@ -183,16 +174,12 @@ func NewService(workDir string, opts ...Option) Service {
 		svc.logger = logger.NewService(svc.workDir)
 	}
 
-	if svc.profile == nil {
-		svc.profile = profile.NewService(profile.WithProjectDir(svc.workDir))
-	}
-
 	if svc.vault == nil {
 		svc.vault = vault.NewService(svc.workDir)
 	}
 
 	if svc.tooling == nil {
-		svc.tooling = tooling.NewService()
+		svc.tooling = tooling.NewService("", svc.workDir)
 	}
 
 	return svc
@@ -242,10 +229,19 @@ func (s *sessionService) StartChat(ctx context.Context, req StartChatRequest) er
 	// Validar variables de entorno requeridas y advertir al usuario si no existen
 	if s.vault != nil {
 		var requiredKeys []string
-		if s.profile != nil && len(req.Profiles) > 0 {
-			if composed, err := s.profile.Compose(ctx, req.Profiles); err == nil && composed != nil {
-				for k := range composed.Env {
-					requiredKeys = append(requiredKeys, k)
+		if s.tooling != nil && len(req.Profiles) > 0 {
+			if tkIDs, err := s.tooling.ResolveToolkits(ctx, req.Profiles); err == nil {
+				if composed, err := s.tooling.ComposeToolkits(ctx, tkIDs); err == nil && composed != nil {
+					for k := range composed.Env {
+						requiredKeys = append(requiredKeys, k)
+					}
+				}
+			}
+			for _, pName := range req.Profiles {
+				if preset, err := s.tooling.GetPreset(ctx, pName); err == nil && preset != nil {
+					for k := range preset.Env {
+						requiredKeys = append(requiredKeys, k)
+					}
 				}
 			}
 		}
@@ -298,7 +294,6 @@ func (s *sessionService) StartChat(ctx context.Context, req StartChatRequest) er
 	sess := New(cfg, s.runner, s.store).
 		WithWorkspace(s.workspace).
 		WithLogger(s.logger).
-		WithProfile(s.profile).
 		WithVault(s.vault).
 		WithTooling(s.tooling)
 	return sess.Start(ctx)
@@ -404,7 +399,11 @@ func (s *sessionService) Resume(ctx context.Context, id string) error {
 		Profiles:        record.Profiles,
 	}
 
-	sess := New(cfg, s.runner, s.store).WithWorkspace(s.workspace).WithLogger(s.logger).WithProfile(s.profile)
+	sess := New(cfg, s.runner, s.store).
+		WithWorkspace(s.workspace).
+		WithLogger(s.logger).
+		WithVault(s.vault).
+		WithTooling(s.tooling)
 	return sess.Start(ctx)
 }
 
@@ -576,4 +575,3 @@ func (s *sessionService) Prune(ctx context.Context) (*PruneResult, error) {
 		DeletedBranches: report.DeletedBranches,
 	}, nil
 }
-

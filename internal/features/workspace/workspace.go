@@ -35,7 +35,6 @@ func (g *OSGitClient) Run(ctx context.Context, dir string, args ...string) (stri
 	return strings.TrimSpace(string(out)), err
 }
 
-
 // Workspace representa el entorno de trabajo preparado para una sesión agéntica.
 type Workspace struct {
 	WorkingDir  string `json:"working_dir"`
@@ -591,24 +590,35 @@ func (p *GitProvider) MergeWorktree(ctx context.Context, sessionID string, baseD
 		if fi, err := os.Stat(worktreeDir); err == nil && fi.IsDir() {
 			manifest, _ := LoadManifest(baseDir, sessionID)
 			if manifest != nil {
-				// A. Restaurar archivos originales que no fueron editados por el agente
+				// A. Restaurar archivos originales (incluso si fueron editados por el agente, para proteger la rama del usuario)
 				for relPath, origContent := range manifest.OriginalFiles {
 					filePath := filepath.Join(worktreeDir, relPath)
 					if curBytes, err := os.ReadFile(filePath); err == nil {
-						if expectedHash, ok := manifest.ProjectedHash[relPath]; ok && HashBytes(curBytes) == expectedHash {
+						curHash := HashBytes(curBytes)
+						expectedHash, ok := manifest.ProjectedHash[relPath]
+						origHash := HashBytes([]byte(origContent))
+						if ok && curHash == expectedHash {
 							_ = os.WriteFile(filePath, []byte(origContent), 0644)
+						} else if curHash != origHash {
+							// El archivo proyectado fue editado por el agente pero no coincide con el original.
+							// Para no filtrar credenciales ni wrappers del sistema en la rama del usuario,
+							// restauramos el contenido original y advertimos.
+							_ = os.WriteFile(filePath, []byte(origContent), 0644)
+							fmt.Fprintf(os.Stderr, "ADVERTENCIA: el archivo proyectado '%s' fue modificado por el agente. Se restauró su contenido original para evitar fuga de configuraciones internas o credenciales en la rama base.\n", relPath)
 						}
 					}
 				}
 
-				// B. Eliminar archivos creados por gz-ia que no fueron editados por el agente
+				// B. Eliminar archivos creados por gz-ia que no existían originalmente
 				for _, relPath := range manifest.CreatedFiles {
 					filePath := filepath.Join(worktreeDir, relPath)
 					if curBytes, err := os.ReadFile(filePath); err == nil {
-						if expectedHash, ok := manifest.ProjectedHash[relPath]; ok && HashBytes(curBytes) == expectedHash {
-							_ = os.Remove(filePath)
-							_, _ = p.git.Run(ctx, worktreeDir, "rm", "-f", "--cached", "--ignore-unmatch", relPath)
+						expectedHash, ok := manifest.ProjectedHash[relPath]
+						if ok && HashBytes(curBytes) != expectedHash {
+							fmt.Fprintf(os.Stderr, "ADVERTENCIA: el archivo proyectado '%s' creado por gz-ia fue modificado por el agente. Se elimina para proteger la rama base.\n", relPath)
 						}
+						_ = os.Remove(filePath)
+						_, _ = p.git.Run(ctx, worktreeDir, "rm", "-f", "--cached", "--ignore-unmatch", relPath)
 					} else {
 						// Symlink o directorio
 						if _, lerr := os.Lstat(filePath); lerr == nil {
@@ -619,26 +629,8 @@ func (p *GitProvider) MergeWorktree(ctx context.Context, sessionID string, baseD
 				}
 				_ = removeEmptyDirs(filepath.Join(worktreeDir, ".agents"))
 			} else {
-				// Fallback si no hay manifiesto:
-				// Restaurar AGENTS.md si estaba trackeado
-				if _, chkErr := p.git.Run(ctx, baseDir, "cat-file", "-e", "HEAD:AGENTS.md"); chkErr == nil {
-					_, _ = p.git.Run(ctx, worktreeDir, "checkout", "HEAD", "--", "AGENTS.md")
-				} else {
-					_ = os.Remove(filepath.Join(worktreeDir, "AGENTS.md"))
-				}
-				// Solo restaurar .mcp.json si estaba en HEAD
-				if _, chkErr := p.git.Run(ctx, baseDir, "cat-file", "-e", "HEAD:.mcp.json"); chkErr == nil {
-					_, _ = p.git.Run(ctx, worktreeDir, "checkout", "HEAD", "--", ".mcp.json")
-				} else {
-					_ = os.Remove(filepath.Join(worktreeDir, ".mcp.json"))
-				}
-				if matches, err := filepath.Glob(filepath.Join(worktreeDir, "*-AGENTS.md")); err == nil {
-					for _, m := range matches {
-						_ = os.Remove(m)
-					}
-				}
-				_ = os.RemoveAll(filepath.Join(worktreeDir, ".agents", "skills"))
-				_ = removeEmptyDirs(filepath.Join(worktreeDir, ".agents"))
+				// Si no hay manifiesto, procedemos de forma segura sin borrar archivos
+				// que podrían pertenecer al repositorio del usuario (sin fallback destructivo).
 			}
 
 			statusOut, _ := p.git.Run(ctx, worktreeDir, "status", "--porcelain")
@@ -939,5 +931,3 @@ func isHarnessArtifact(path string) bool {
 	}
 	return false
 }
-
-

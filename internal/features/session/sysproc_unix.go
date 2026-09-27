@@ -5,15 +5,21 @@ package session
 import (
 	"os"
 	"os/exec"
+	"os/signal"
 	"syscall"
-	"unsafe"
 
+	"github.com/mattn/go-isatty"
 	"golang.org/x/sys/unix"
 )
 
 func isTerminal(fd int) bool {
-	_, err := unix.IoctlGetTermios(fd, unix.TCGETS)
-	return err == nil
+	return isatty.IsTerminal(uintptr(fd))
+}
+
+func restoreTTY(fd int, parentPgid int) {
+	signal.Ignore(syscall.SIGTTOU)
+	defer signal.Reset(syscall.SIGTTOU)
+	_ = unix.IoctlSetPointerInt(fd, unix.TIOCSPGRP, parentPgid)
 }
 
 // configureSysProcAttr configura los atributos de proceso en sistemas Unix.
@@ -29,8 +35,7 @@ func configureSysProcAttr(cmd *exec.Cmd) func() {
 		}
 		parentPgid := syscall.Getpgrp()
 		return func() {
-			// Restaurar el grupo de procesos padre al Foreground de la terminal
-			_, _, _ = unix.Syscall(unix.SYS_IOCTL, uintptr(fd), unix.TIOCSPGRP, uintptr(unsafe.Pointer(&parentPgid)))
+			restoreTTY(fd, parentPgid)
 		}
 	}
 

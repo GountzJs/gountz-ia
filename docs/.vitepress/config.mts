@@ -35,7 +35,7 @@ export default withMermaid(
             { text: '¿Qué es gz-ia?', link: '/guide/what-is-gz-ia' },
             { text: 'Inicio Rápido (Quickstart)', link: '/guide/quickstart' },
             { text: 'Agentes Soportados (Multi-Driver)', link: '/guide/providers' },
-            { text: 'Perfiles Agénticos y Skills', link: '/guide/profiles' },
+            { text: 'Toolkits y Perfiles Emergentes', link: '/guide/profiles' },
             { text: 'Gestión de Secretos (Vault)', link: '/guide/vault' },
             { text: 'Uso de la TUI Interactiva', link: '/guide/tui' },
             { text: 'Flujos de Trabajo del Mundo Real', link: '/guide/workflows' }

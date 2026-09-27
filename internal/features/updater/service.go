@@ -2,8 +2,12 @@ package updater
 
 import (
 	"archive/tar"
+	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -86,9 +90,10 @@ func NormalizeVersion(v string) string {
 
 // CompareVersions compara dos versiones semánticas (v1 vs v2).
 // Retorna:
-//   1 si v1 > v2
-//  -1 si v1 < v2
-//   0 si v1 == v2
+//
+//	 1 si v1 > v2
+//	-1 si v1 < v2
+//	 0 si v1 == v2
 func CompareVersions(v1, v2 string) int {
 	v1Clean := NormalizeVersion(v1)
 	v2Clean := NormalizeVersion(v2)
@@ -151,24 +156,60 @@ func buildReleaseInfo(latestVer, latestTag, currentVersion, downloadBaseURL stri
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 	pkgName := fmt.Sprintf("gz-ia_%s_%s_%s", latestVer, goos, goarch)
-	tarballName := fmt.Sprintf("%s.tar.gz", pkgName)
+	archiveExt := ".tar.gz"
+	if goos == "windows" {
+		archiveExt = ".zip"
+	}
+	archiveName := fmt.Sprintf("%s%s", pkgName, archiveExt)
 
-	downloadURL := fmt.Sprintf("%s/%s/%s", strings.TrimRight(downloadBaseURL, "/"), latestTag, tarballName)
+	downloadURL := fmt.Sprintf("%s/%s/%s", strings.TrimRight(downloadBaseURL, "/"), latestTag, archiveName)
 	for _, asset := range assets {
-		if asset.Name == tarballName && asset.BrowserDownloadURL != "" {
+		if asset.Name == archiveName && asset.BrowserDownloadURL != "" {
 			downloadURL = asset.BrowserDownloadURL
 			break
 		}
 	}
 
-	return &ReleaseInfo{
-		Tag:         latestTag,
-		Version:     latestVer,
-		CurrentVer:  currentVersion,
-		IsNewer:     isNewer,
-		DownloadURL: downloadURL,
-		PackageName: pkgName,
+	checksumsURL := ""
+	for _, asset := range assets {
+		lower := strings.ToLower(asset.Name)
+		if lower == "checksums.txt" || lower == "sha256sums" || lower == "sha256sums.txt" {
+			checksumsURL = asset.BrowserDownloadURL
+			break
+		}
 	}
+	if checksumsURL == "" {
+		checksumsURL = fmt.Sprintf("%s/%s/checksums.txt", strings.TrimRight(downloadBaseURL, "/"), latestTag)
+	}
+
+	return &ReleaseInfo{
+		Tag:          latestTag,
+		Version:      latestVer,
+		CurrentVer:   currentVersion,
+		IsNewer:      isNewer,
+		DownloadURL:  downloadURL,
+		PackageName:  pkgName,
+		ChecksumsURL: checksumsURL,
+	}
+}
+
+func parseChecksumForFile(checksumsContent string, targetFileName string) string {
+	lines := strings.Split(checksumsContent, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			hash := fields[0]
+			fileName := strings.TrimPrefix(fields[len(fields)-1], "*")
+			if filepath.Base(fileName) == targetFileName {
+				return strings.ToLower(hash)
+			}
+		}
+	}
+	return ""
 }
 
 // CheckLatest consulta la última versión disponible en GitHub Releases.
@@ -242,6 +283,7 @@ func (u *updaterService) Update(ctx context.Context, targetVer string, installDi
 	}
 
 	var downloadURL string
+	var checksumsURL string
 	var verToInstall string
 
 	if targetVer == "" {
@@ -251,13 +293,19 @@ func (u *updaterService) Update(ctx context.Context, targetVer string, installDi
 		}
 		verToInstall = info.Version
 		downloadURL = info.DownloadURL
+		checksumsURL = info.ChecksumsURL
 	} else {
 		verToInstall = NormalizeVersion(targetVer)
 		tag := "v" + verToInstall
 		goos := runtime.GOOS
 		goarch := runtime.GOARCH
-		tarballName := fmt.Sprintf("gz-ia_%s_%s_%s.tar.gz", verToInstall, goos, goarch)
-		downloadURL = fmt.Sprintf("%s/%s/%s", strings.TrimRight(u.cfg.DownloadBaseURL, "/"), tag, tarballName)
+		archiveExt := ".tar.gz"
+		if goos == "windows" {
+			archiveExt = ".zip"
+		}
+		archiveName := fmt.Sprintf("gz-ia_%s_%s_%s%s", verToInstall, goos, goarch, archiveExt)
+		downloadURL = fmt.Sprintf("%s/%s/%s", strings.TrimRight(u.cfg.DownloadBaseURL, "/"), tag, archiveName)
+		checksumsURL = fmt.Sprintf("%s/%s/checksums.txt", strings.TrimRight(u.cfg.DownloadBaseURL, "/"), tag)
 	}
 
 	goarch := runtime.GOARCH
@@ -281,65 +329,134 @@ func (u *updaterService) Update(ctx context.Context, targetVer string, installDi
 		return nil, fmt.Errorf("GitHub retornó HTTP %d al solicitar paquete desde %s. Verifica que la versión esté publicada", resp.StatusCode, downloadURL)
 	}
 
-	gzReader, err := gzip.NewReader(resp.Body)
+	packageBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("error abriendo stream gzip: %w", err)
+		return nil, fmt.Errorf("error leyendo contenido del paquete: %w", err)
 	}
-	defer gzReader.Close()
 
-	tarReader := tar.NewReader(gzReader)
-	var installedBinaries []string
+	archiveName := filepath.Base(downloadURL)
 
-	for {
-		header, err := tarReader.Next()
-		if err == io.EOF {
-			break
+	// Verificación de integridad SHA-256 contra checksums.txt si está presente
+	if checksumsURL != "" {
+		reqCS, errCS := http.NewRequestWithContext(ctx, http.MethodGet, checksumsURL, nil)
+		if errCS == nil {
+			reqCS.Header.Set("User-Agent", "gz-ia-updater")
+			respCS, doErr := u.httpClient.Do(reqCS)
+			if doErr == nil {
+				defer respCS.Body.Close()
+				if respCS.StatusCode == http.StatusOK {
+					csBytes, _ := io.ReadAll(respCS.Body)
+					expectedChecksum := parseChecksumForFile(string(csBytes), archiveName)
+					if expectedChecksum != "" {
+						actualHashBytes := sha256.Sum256(packageBytes)
+						actualHash := hex.EncodeToString(actualHashBytes[:])
+						if strings.ToLower(actualHash) != strings.ToLower(expectedChecksum) {
+							return nil, fmt.Errorf("verificación SHA-256 fallida para %s: esperado %s, obtenido %s", archiveName, expectedChecksum, actualHash)
+						}
+					}
+				}
+			}
 		}
-		if err != nil {
-			return nil, fmt.Errorf("error leyendo archivo tar: %w", err)
-		}
+	}
 
-		if header.Typeflag != tar.TypeReg {
-			continue
-		}
-
-		baseName := filepath.Base(header.Name)
-		if baseName != "gz-ia" {
-			continue
-		}
-
-		// Reemplazo atómico seguro: escribir en archivo temporal en el mismo directorio y renombrar.
-		// Esto evita el error de Linux ETXTBSY (text file busy) cuando el ejecutable está en ejecución.
+	installBinary := func(baseName string, r io.Reader) error {
 		tmpFile, err := os.CreateTemp(installDir, fmt.Sprintf(".%s-tmp-*", baseName))
 		if err != nil {
-			return nil, fmt.Errorf("error creando archivo temporal para %s: %w", baseName, err)
+			return fmt.Errorf("error creando archivo temporal para %s: %w", baseName, err)
 		}
 		tmpPath := tmpFile.Name()
 
-		if _, err := io.Copy(tmpFile, tarReader); err != nil {
+		if _, err := io.Copy(tmpFile, r); err != nil {
 			tmpFile.Close()
 			_ = os.Remove(tmpPath)
-			return nil, fmt.Errorf("error escribiendo binario %s: %w", baseName, err)
+			return fmt.Errorf("error escribiendo binario %s: %w", baseName, err)
 		}
 
 		if err := tmpFile.Chmod(0755); err != nil {
 			tmpFile.Close()
 			_ = os.Remove(tmpPath)
-			return nil, fmt.Errorf("error configurando permisos ejecutables para %s: %w", baseName, err)
+			return fmt.Errorf("error configurando permisos ejecutables para %s: %w", baseName, err)
 		}
 		tmpFile.Close()
 
 		targetPath := filepath.Join(installDir, baseName)
-		if err := os.Rename(tmpPath, targetPath); err != nil {
-			_ = os.Remove(tmpPath)
-			return nil, fmt.Errorf("error moviendo binario temporal a %s: %w", targetPath, err)
+		// En Windows, para el reemplazo atómico, renombra el ejecutable viejo a gz-ia.exe.old antes de escribir el nuevo ejecutable
+		if runtime.GOOS == "windows" {
+			if _, statErr := os.Stat(targetPath); statErr == nil {
+				oldPath := targetPath + ".old"
+				_ = os.Remove(oldPath)
+				if err := os.Rename(targetPath, oldPath); err != nil {
+					_ = os.Remove(tmpPath)
+					return fmt.Errorf("error renombrando ejecutable previo a %s: %w", oldPath, err)
+				}
+			}
 		}
 
-		installedBinaries = append(installedBinaries, baseName)
+		if err := os.Rename(tmpPath, targetPath); err != nil {
+			_ = os.Remove(tmpPath)
+			return fmt.Errorf("error moviendo binario temporal a %s: %w", targetPath, err)
+		}
+		return nil
+	}
+
+	var installedBinaries []string
+	isZip := strings.HasSuffix(strings.ToLower(archiveName), ".zip") || bytes.HasPrefix(packageBytes, []byte("PK\x03\x04"))
+
+	if isZip {
+		zr, err := zip.NewReader(bytes.NewReader(packageBytes), int64(len(packageBytes)))
+		if err != nil {
+			return nil, fmt.Errorf("error abriendo archivo zip: %w", err)
+		}
+		for _, file := range zr.File {
+			baseName := filepath.Base(file.Name)
+			if baseName != "gz-ia" && baseName != "gz-ia.exe" {
+				continue
+			}
+			rc, err := file.Open()
+			if err != nil {
+				return nil, fmt.Errorf("error leyendo binario %s del zip: %w", file.Name, err)
+			}
+			err = installBinary(baseName, rc)
+			rc.Close()
+			if err != nil {
+				return nil, err
+			}
+			installedBinaries = append(installedBinaries, baseName)
+		}
+	} else {
+		gzReader, err := gzip.NewReader(bytes.NewReader(packageBytes))
+		if err != nil {
+			return nil, fmt.Errorf("error abriendo stream gzip: %w", err)
+		}
+		defer gzReader.Close()
+
+		tarReader := tar.NewReader(gzReader)
+		for {
+			header, err := tarReader.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return nil, fmt.Errorf("error leyendo archivo tar: %w", err)
+			}
+			if header.Typeflag != tar.TypeReg {
+				continue
+			}
+
+			baseName := filepath.Base(header.Name)
+			if baseName != "gz-ia" && baseName != "gz-ia.exe" {
+				continue
+			}
+
+			if err := installBinary(baseName, tarReader); err != nil {
+				return nil, err
+			}
+			installedBinaries = append(installedBinaries, baseName)
+		}
 	}
 
 	if len(installedBinaries) == 0 {
-		return nil, fmt.Errorf("no se encontró el binario 'gz-ia' en el paquete descargado")
+		return nil, fmt.Errorf("no se encontró el binario 'gz-ia' o 'gz-ia.exe' en el paquete descargado")
 	}
 
 	return &UpdateResult{

@@ -378,7 +378,7 @@ Semántica de integración:
 1. Si hay cambios pendientes en el worktree, crea un commit de seguridad en la rama 'harness/<id>'.
 2. Ejecuta un git merge (o git merge --squash con --squash, y sin commit si se pasa --no-commit) de la rama 'harness/<id>' en la rama base activa del repositorio.
 3. Si la rama base avanzó y existen conflictos, Git se detiene sin sobreescribir tus archivos, informa los archivos en conflicto y mantiene el worktree de la sesión intacto para resolución manual ('gz-ia session path <id>') o abortar ('git merge --abort').`,
-		Args:  cobra.ExactArgs(1),
+		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			id := args[0]
 			workDir = resolveWorkDir(c.Context(), workDir)

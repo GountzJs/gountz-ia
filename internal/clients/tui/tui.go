@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"gz-ia/internal/features/profile"
 	"gz-ia/internal/features/session"
+	"gz-ia/internal/features/tooling"
 	"gz-ia/internal/features/updater"
 	"gz-ia/internal/features/vault"
 	"gz-ia/internal/features/workspace"
@@ -27,7 +27,7 @@ type Client struct {
 	killer         session.ProcessKiller
 	workspace      workspace.Provider
 	updaterService updater.Service
-	profileService profile.Service
+	toolingService tooling.Service
 	vaultService   vault.Service
 	in             io.Reader
 	out            io.Writer
@@ -79,9 +79,9 @@ func (c *Client) WithUpdater(u updater.Service) *Client {
 	return c
 }
 
-// WithProfile permite inyectar una instancia del servicio de perfiles agénticos.
-func (c *Client) WithProfile(p profile.Service) *Client {
-	c.profileService = p
+// WithTooling permite inyectar una instancia del servicio de tooling modular.
+func (c *Client) WithTooling(t tooling.Service) *Client {
+	c.toolingService = t
 	return c
 }
 
@@ -98,11 +98,11 @@ func (c *Client) getVault(workDir string) vault.Service {
 	return vault.NewService(workDir)
 }
 
-func (c *Client) getProfileService(workDir string) profile.Service {
-	if c.profileService != nil {
-		return c.profileService
+func (c *Client) getToolingService(workDir string) tooling.Service {
+	if c.toolingService != nil {
+		return c.toolingService
 	}
-	return profile.NewService(profile.WithProjectDir(workDir))
+	return tooling.NewService("", workDir)
 }
 
 type singleByteReader struct {
@@ -326,42 +326,120 @@ func (c *Client) handleNewChat(icons IconSet) error {
 
 	cwd, _ := os.Getwd()
 	svc := c.getService(cwd)
+	toolingSvc := c.getToolingService(cwd)
 
-	// Consultar perfiles agénticos disponibles (globales y de proyecto)
-	profSvc := c.getProfileService(cwd)
-	var selectedProfiles []string
-	if availableProfiles, err := profSvc.ListProfiles(context.Background()); err == nil && len(availableProfiles) > 0 {
-		var profileOptions []huh.Option[string]
-		for _, p := range availableProfiles {
-			label := fmt.Sprintf("%s (%s, %d skills)", p.Name, p.Scope, len(p.Skills))
-			if p.Description != "" {
-				label = fmt.Sprintf("%s — %s", label, p.Description)
+	var selectedToolings []string
+	var toolkitOptions []huh.Option[string]
+
+	// 1. Opciones de Presets
+	if presets, err := toolingSvc.ListPresets(context.Background()); err == nil {
+		for _, p := range presets {
+			desc := p.Description
+			if desc != "" {
+				desc = " — " + desc
 			}
-			profileOptions = append(profileOptions, huh.NewOption(label, p.Name))
-		}
-
-		profileForm := huh.NewForm(
-			huh.NewGroup(
-				huh.NewMultiSelect[string]().
-					Title(fmt.Sprintf("%s Perfiles Agénticos a activar (Opcional):", icons.Box)).
-					Description("Espacio para seleccionar/deseleccionar perfiles. Enter para continuar.").
-					Options(profileOptions...).
-					Value(&selectedProfiles),
-			),
-		).WithTheme(CustomHuhTheme())
-		profileForm = c.prepareForm(profileForm)
-
-		if err := profileForm.Run(); err != nil {
-			return nil
+			label := fmt.Sprintf("[Preset] %s%s (%d toolkits)", p.Name, desc, len(p.Toolkits))
+			toolkitOptions = append(toolkitOptions, huh.NewOption(label, p.Name))
 		}
 	}
+
+	// 2. Opciones de Toolkits
+	if toolkits, err := toolingSvc.ListToolkits(context.Background()); err == nil {
+		for _, tk := range toolkits {
+			desc := tk.Description
+			if desc != "" {
+				desc = " — " + desc
+			}
+			label := fmt.Sprintf("[Toolkit] %s (%s, %d skills)%s", tk.ID, tk.Scope, len(tk.SkillPaths), desc)
+			toolkitOptions = append(toolkitOptions, huh.NewOption(label, tk.ID))
+		}
+	}
+
+	// 3. Acción interactiva para scaffolding de nuevo toolkit
+	toolkitOptions = append(toolkitOptions, huh.NewOption(
+		fmt.Sprintf("%s [+] Inicializar nuevo toolkit (Scaffold)...", icons.Sparkle),
+		"__scaffold__",
+	))
+
+	toolkitForm := huh.NewForm(
+		huh.NewGroup(
+			huh.NewMultiSelect[string]().
+				Title(fmt.Sprintf("%s Toolkits y Presets Agénticos a activar (Opcional):", icons.Box)).
+				Description("Espacio para seleccionar/deseleccionar. Enter para continuar.").
+				Options(toolkitOptions...).
+				Value(&selectedToolings),
+		),
+	).WithTheme(CustomHuhTheme())
+	toolkitForm = c.prepareForm(toolkitForm)
+
+	if err := toolkitForm.Run(); err != nil {
+		return nil
+	}
+
+	// Si se seleccionó la opción de scaffolding, ejecutar el formulario interactivo Huh
+	hasScaffold := false
+	var finalToolings []string
+	for _, item := range selectedToolings {
+		if item == "__scaffold__" {
+			hasScaffold = true
+		} else {
+			finalToolings = append(finalToolings, item)
+		}
+	}
+
+	if hasScaffold {
+		var (
+			newTKID   string
+			newTKDesc string
+			newTKGlob bool
+		)
+		scaffoldForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Identificador del nuevo toolkit:").
+					Description("Nombre único en kebab-case (ej. backend-go, devops-aws)").
+					Value(&newTKID).
+					Validate(func(s string) error {
+						if strings.TrimSpace(s) == "" {
+							return fmt.Errorf("el ID no puede estar vacío")
+						}
+						return nil
+					}),
+				huh.NewInput().
+					Title("Descripción del toolkit:").
+					Description("Propósito o directivas principales").
+					Value(&newTKDesc),
+				huh.NewConfirm().
+					Title("¿Crear en ámbito global (~/.config/gz-ia/tooling) en lugar del proyecto (.harness)?").
+					Value(&newTKGlob),
+			),
+		).WithTheme(CustomHuhTheme())
+		scaffoldForm = c.prepareForm(scaffoldForm)
+
+		if err := scaffoldForm.Run(); err == nil && strings.TrimSpace(newTKID) != "" {
+			cleanID := strings.TrimSpace(newTKID)
+			created, err := toolingSvc.CreateToolkit(context.Background(), tooling.CreateToolkitRequest{
+				ID:          cleanID,
+				Description: newTKDesc,
+				Global:      newTKGlob,
+			})
+			if err == nil && created != nil {
+				fmt.Fprintf(c.getOut(), "%s Toolkit '%s' creado exitosamente y seleccionado para la sesión.\n", icons.Check, cleanID)
+				finalToolings = append(finalToolings, cleanID)
+			} else {
+				fmt.Fprintf(c.getOut(), "%s Error creando toolkit: %v\n", icons.Cross, err)
+			}
+		}
+	}
+
+	selectedToolings = finalToolings
 
 	req := session.StartChatRequest{
 		Provider:        selectedDriver.ID(),
 		WorkingDir:      cwd,
 		PermissionLevel: session.PermissionLevel(selectedPerm),
 		BinaryPath:      selectedDriver.BinaryName(),
-		Profiles:        selectedProfiles,
+		Profiles:        selectedToolings,
 		OnLaunch: func(id string, isIsolated bool) {
 			var permLabel string
 			switch session.PermissionLevel(selectedPerm) {
@@ -378,13 +456,13 @@ func (c *Client) handleNewChat(icons IconSet) error {
 				modeDesc = fmt.Sprintf("Worktree aislado (.harness/worktrees/%s)", id)
 			}
 
-			profileDesc := ""
-			if len(selectedProfiles) > 0 {
-				profileDesc = fmt.Sprintf(" | Perfiles: %s", strings.Join(selectedProfiles, ", "))
+			toolingDesc := ""
+			if len(selectedToolings) > 0 {
+				toolingDesc = fmt.Sprintf(" | Toolkits/Presets: %s", strings.Join(selectedToolings, ", "))
 			}
 
 			launchHeader := lipgloss.NewStyle().Foreground(ColorSecondary).Bold(true).
-				Render(fmt.Sprintf("\n%s Iniciando %s [%s] en [%s] | Modo: %s | Workspace: %s%s...\n", icons.Rocket, selectedDriver.DisplayName(), id, cwd, permLabel, modeDesc, profileDesc))
+				Render(fmt.Sprintf("\n%s Iniciando %s [%s] en [%s] | Modo: %s | Workspace: %s%s...\n", icons.Rocket, selectedDriver.DisplayName(), id, cwd, permLabel, modeDesc, toolingDesc))
 			fmt.Fprintln(c.getOut(), launchHeader)
 		},
 	}

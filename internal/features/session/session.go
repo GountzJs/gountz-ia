@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"gz-ia/internal/features/logger"
-	"gz-ia/internal/features/profile"
 	"gz-ia/internal/features/tooling"
 	"gz-ia/internal/features/vault"
 	"gz-ia/internal/features/workspace"
 	"os"
 	"os/exec"
+	"reflect"
 	"time"
 )
 
@@ -150,7 +150,6 @@ func (r *OSRunner) Run(ctx context.Context, binary string, args []string, dir st
 	}
 
 	waitErr := cmd.Wait()
-	restoreTTY()
 	exitCode := 0
 	if waitErr != nil {
 		var exitError *exec.ExitError
@@ -171,7 +170,6 @@ type Session struct {
 	Store     Store
 	Workspace workspace.Provider
 	Logger    logger.Service
-	Profile   profile.Service
 	Vault     vault.Service
 	Tooling   tooling.Service
 }
@@ -211,12 +209,6 @@ func (s *Session) WithWorkspace(ws workspace.Provider) *Session {
 // WithLogger permite inyectar un servicio de logger para observabilidad de eventos de sesión.
 func (s *Session) WithLogger(l logger.Service) *Session {
 	s.Logger = l
-	return s
-}
-
-// WithProfile permite inyectar un servicio de perfiles agénticos.
-func (s *Session) WithProfile(p profile.Service) *Session {
-	s.Profile = p
 	return s
 }
 
@@ -278,32 +270,9 @@ func (s *Session) Start(ctx context.Context) error {
 
 	// Proyección modular de directivas y tooling (unificado bajo el proyector de Tooling)
 	if s.Tooling != nil && len(s.Config.Profiles) > 0 {
-		var activeToolkitIDs []string
-		mcpServers := make(map[string]any)
-		envVars := make(map[string]string)
-
-		for _, profName := range s.Config.Profiles {
-			if profCfg, err := s.Tooling.GetProfile(ctx, profName); err == nil && profCfg != nil {
-				activeToolkitIDs = append(activeToolkitIDs, profCfg.Toolkits...)
-				for k, v := range profCfg.MCPServers {
-					mcpServers[k] = v
-				}
-				for k, v := range profCfg.Env {
-					envVars[k] = v
-				}
-			}
-		}
-
-		// Si s.Profile también tiene definiciones de perfil (ej. MCP servers o directivas), integrarlos
-		if s.Profile != nil {
-			if profComposed, err := s.Profile.Compose(ctx, s.Config.Profiles); err == nil && profComposed != nil {
-				for k, v := range profComposed.MCPServers {
-					mcpServers[k] = v
-				}
-				for k, v := range profComposed.Env {
-					envVars[k] = v
-				}
-			}
+		activeToolkitIDs, err := s.Tooling.ResolveToolkits(ctx, s.Config.Profiles)
+		if err != nil {
+			return fmt.Errorf("error al resolver toolkits en tooling: %w", err)
 		}
 
 		composedTooling, err := s.Tooling.ComposeToolkits(ctx, activeToolkitIDs)
@@ -311,14 +280,41 @@ func (s *Session) Start(ctx context.Context) error {
 			return fmt.Errorf("error al componer toolkits en tooling: %w", err)
 		}
 		if composedTooling != nil {
-			for k, v := range mcpServers {
-				composedTooling.MCPServers[k] = v
+			// Integrar variables de entorno y servidores MCP de los presets si aplica
+			for _, profName := range s.Config.Profiles {
+				if preset, err := s.Tooling.GetPreset(ctx, profName); err == nil && preset != nil {
+					for k, v := range preset.MCPServers {
+						if k == "gz-ia" {
+							return fmt.Errorf("el servidor MCP 'gz-ia' está reservado para uso interno y no puede ser definido por un perfil")
+						}
+						if existing, conflict := composedTooling.MCPServers[k]; conflict {
+							if !reflect.DeepEqual(existing, v) {
+								return fmt.Errorf("colisión de servidores MCP: el servidor '%s' está definido con configuraciones distintas", k)
+							}
+						}
+						composedTooling.MCPServers[k] = v
+					}
+					for k, v := range preset.Env {
+						if existingVal, conflict := composedTooling.Env[k]; conflict && existingVal != v {
+							return fmt.Errorf("colisión de variables de entorno: variable '%s' con valores distintos (%s vs %s)", k, existingVal, v)
+						}
+						composedTooling.Env[k] = v
+					}
+				}
 			}
-			for k, v := range envVars {
-				composedTooling.Env[k] = v
+
+			// Si es reanudación y ya existe un manifiesto previo, no volver a reproyectar desde cero
+			shouldProject := true
+			if s.Config.Resume {
+				if existingManifest, err := workspace.LoadManifest(ws.WorkingDir, s.Config.ID); err == nil && existingManifest != nil {
+					shouldProject = false
+				}
 			}
-			if projErr := s.Tooling.ProjectIntoWorktree(ctx, ws.TargetDir, composedTooling, s.Config.ID, ws.WorkingDir); projErr != nil {
-				return fmt.Errorf("error al proyectar tooling en el worktree: %w", projErr)
+
+			if shouldProject {
+				if projErr := s.Tooling.ProjectIntoWorktree(ctx, ws.TargetDir, composedTooling, s.Config.ID, ws.WorkingDir); projErr != nil {
+					return fmt.Errorf("error al proyectar tooling en el worktree: %w", projErr)
+				}
 			}
 		}
 	}

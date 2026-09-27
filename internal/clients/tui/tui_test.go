@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"gz-ia/internal/features/logger"
 	"gz-ia/internal/features/metrics"
-	"gz-ia/internal/features/profile"
 	"gz-ia/internal/features/session"
+	"gz-ia/internal/features/tooling"
 	"gz-ia/internal/features/updater"
 	"gz-ia/internal/features/vault"
 	"gz-ia/internal/features/workspace"
@@ -54,7 +55,7 @@ func TestNewClientWithCustomRunner(t *testing.T) {
 
 type mockTUIWorkspace struct{}
 
-func (m *mockTUIWorkspace) IsGitAvailable(ctx context.Context, dir string) bool { return false }
+func (m *mockTUIWorkspace) IsGitAvailable(ctx context.Context, dir string) bool       { return false }
 func (m *mockTUIWorkspace) ResolveProjectRoot(ctx context.Context, dir string) string { return dir }
 func (m *mockTUIWorkspace) Prepare(ctx context.Context, id, dir string) (*workspace.Workspace, error) {
 	return nil, nil
@@ -345,19 +346,35 @@ func (m *mockTUISessionService) StartChat(ctx context.Context, req session.Start
 	}
 	return nil
 }
-func (m *mockTUISessionService) List(ctx context.Context) ([]session.SessionRecord, error) { return nil, nil }
-func (m *mockTUISessionService) GetRecord(ctx context.Context, id string) (*session.SessionRecord, error) { return nil, nil }
-func (m *mockTUISessionService) GetSession(ctx context.Context, id string) (*session.SessionRecord, error) { return nil, nil }
-func (m *mockTUISessionService) Kill(ctx context.Context, id string) error { return nil }
-func (m *mockTUISessionService) Resume(ctx context.Context, id string) error { return nil }
-func (m *mockTUISessionService) Delete(ctx context.Context, id string) error { return nil }
+func (m *mockTUISessionService) List(ctx context.Context) ([]session.SessionRecord, error) {
+	return nil, nil
+}
+func (m *mockTUISessionService) GetRecord(ctx context.Context, id string) (*session.SessionRecord, error) {
+	return nil, nil
+}
+func (m *mockTUISessionService) GetSession(ctx context.Context, id string) (*session.SessionRecord, error) {
+	return nil, nil
+}
+func (m *mockTUISessionService) Kill(ctx context.Context, id string) error           { return nil }
+func (m *mockTUISessionService) Resume(ctx context.Context, id string) error         { return nil }
+func (m *mockTUISessionService) Delete(ctx context.Context, id string) error         { return nil }
 func (m *mockTUISessionService) Path(ctx context.Context, id string) (string, error) { return "", nil }
-func (m *mockTUISessionService) Diff(ctx context.Context, id string, statOnly bool) (string, error) { return "", nil }
-func (m *mockTUISessionService) Merge(ctx context.Context, id string, opts session.MergeOptions) (*workspace.MergeResult, error) { return nil, nil }
-func (m *mockTUISessionService) Metrics(ctx context.Context, id string) (*metrics.SessionMetrics, error) { return nil, nil }
+func (m *mockTUISessionService) Diff(ctx context.Context, id string, statOnly bool) (string, error) {
+	return "", nil
+}
+func (m *mockTUISessionService) Merge(ctx context.Context, id string, opts session.MergeOptions) (*workspace.MergeResult, error) {
+	return nil, nil
+}
+func (m *mockTUISessionService) Metrics(ctx context.Context, id string) (*metrics.SessionMetrics, error) {
+	return nil, nil
+}
 func (m *mockTUISessionService) LogEvent(ctx context.Context, evt *logger.Event) error { return nil }
-func (m *mockTUISessionService) GetEvents(ctx context.Context, id string) ([]logger.Event, error) { return nil, nil }
-func (m *mockTUISessionService) WatchEvents(ctx context.Context, id string) (<-chan logger.Event, error) { return nil, nil }
+func (m *mockTUISessionService) GetEvents(ctx context.Context, id string) ([]logger.Event, error) {
+	return nil, nil
+}
+func (m *mockTUISessionService) WatchEvents(ctx context.Context, id string) (<-chan logger.Event, error) {
+	return nil, nil
+}
 
 func (m *mockTUISessionService) Read(ctx context.Context, id string, statOnly bool) (string, error) {
 	if m.readFunc != nil {
@@ -629,15 +646,15 @@ func TestHandleNewChat_SmartPreselection_NoneAvailable(t *testing.T) {
 	}
 }
 
-func TestClient_WithProfile(t *testing.T) {
+func TestClient_WithTooling(t *testing.T) {
 	tmpDir := t.TempDir()
-	profSvc := profile.NewService(profile.WithProjectDir(tmpDir))
-	client := New(nil, nil).WithProfile(profSvc)
-	if client.profileService == nil {
-		t.Fatal("profileService no inicializado")
+	toolingSvc := tooling.NewService(filepath.Join(tmpDir, "tooling"), tmpDir)
+	client := New(nil, nil).WithTooling(toolingSvc)
+	if client.toolingService == nil {
+		t.Fatal("toolingService no inicializado")
 	}
-	if client.getProfileService(tmpDir) != profSvc {
-		t.Errorf("getProfileService debió retornar profSvc inyectado")
+	if client.getToolingService(tmpDir) != toolingSvc {
+		t.Errorf("getToolingService debió retornar toolingSvc inyectado")
 	}
 }
 
@@ -669,7 +686,3 @@ func TestClient_HandleVault_Back(t *testing.T) {
 		t.Fatalf("handleVault con salida 'back' falló: %v", err)
 	}
 }
-
-
-
-

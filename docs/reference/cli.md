@@ -10,12 +10,12 @@ Guía detallada de sintaxis, argumentos, banderas y códigos de retorno de todos
 | :--- | :--- | :--- | :--- |
 | [`gz-ia`](#gz-ia-start) | N/A | Heredado | Lanza la interfaz gráfica de terminal (TUI) por defecto. |
 | [`gz-ia start`](#gz-ia-start) | N/A | Heredado | Inicia la TUI interactiva con estética Fastfetch y menús. |
-| [`gz-ia chat`](#gz-ia-chat) | `-p, --provider`<br>`-m, --perm`<br>`-P, --profile`<br>`-i, --prompt`<br>`-d, --dir` | `readonly`<br>`supervised`<br>`autonomous` | Inicia una sesión directa conectada al agente de IA seleccionado. |
-| [`gz-ia profile list`](#gz-ia-profile) | `-d, --dir` | N/A | Lista los perfiles agénticos disponibles (globales y de proyecto). |
-| [`gz-ia profile show`](#gz-ia-profile) | `<name>`<br>`-d, --dir` | N/A | Muestra la configuración detallada de un perfil agéntico. |
-| [`gz-ia profile create`](#gz-ia-profile) | `<name>`<br>`--desc`<br>`--agents-file`<br>`--global`<br>`-d, --dir` | N/A | Crea un nuevo perfil agéntico con descriptor `perfil.json`. |
-| [`gz-ia profile skills`](#gz-ia-profile) | `-d, --dir` | N/A | Explora el catálogo clasificado de skills disponibles. |
-| [`gz-ia profile path`](#gz-ia-profile) | `[name]`<br>`-d, --dir` | N/A | Imprime la ruta al directorio del perfil o del catálogo. |
+| [`gz-ia chat`](#gz-ia-chat) | `-p, --provider`<br>`-m, --perm`<br>`-T, --toolkit`<br>`-P, --preset, --profile`<br>`-i, --prompt`<br>`-d, --dir` | `readonly`<br>`supervised`<br>`autonomous` | Inicia una sesión directa conectada al agente de IA seleccionado. |
+| [`gz-ia toolkit list`](#gz-ia-toolkit) | `-d, --dir` | N/A | Lista los toolkits modulares y presets disponibles (globales y de proyecto). |
+| [`gz-ia toolkit show`](#gz-ia-toolkit) | `<id>`<br>`-d, --dir` | N/A | Muestra la configuración detallada de un toolkit o preset. |
+| [`gz-ia toolkit create`](#gz-ia-toolkit) | `<id>`<br>`--desc`<br>`--global`<br>`-d, --dir` | N/A | Crea el scaffolding inicial para un nuevo toolkit modular (alias: `init`). |
+| [`gz-ia toolkit skills`](#gz-ia-toolkit) | `-d, --dir` | N/A | Explora el catálogo unificado de skills disponibles en los toolkits. |
+| [`gz-ia toolkit path`](#gz-ia-toolkit) | `[id]`<br>`-d, --dir` | N/A | Imprime la ruta al directorio del toolkit o del catálogo local. |
 | [`gz-ia session list`](#gz-ia-session-list) | `-d, --dir` | N/A | Lista en formato tabular todas las sesiones del proyecto. |
 | [`gz-ia session show`](#gz-ia-session-show) | `<id>`<br>`-d, --dir` | N/A | Muestra la metadata detallada y estado de una sesión. |
 | [`gz-ia session kill`](#gz-ia-session-kill) | `<id>`<br>`-d, --dir` | N/A | Termina de forma controlada el proceso de una sesión (`SIGTERM` + `SIGKILL`). |
@@ -62,7 +62,8 @@ gz-ia chat [flags]
 **Banderas (Flags):**
 - `-p, --provider <id>`: Proveedor agéntico (`agy`, `claude`, `opencode`, `pi-agent`). Predeterminado: primer agente instalado disponible.
 - `-m, --perm <nivel>`: Nivel de permiso (`readonly`, `supervised`, `autonomous`). Predeterminado: `supervised`.
-- `-P, --profile <nombre>`: Perfiles agénticos a activar, separados por coma o repetidos (ej. `-P frontend,data` o `-P frontend -P data`).
+- `-T, --toolkit <id>`: Toolkits modulares a activar, separados por coma o repetidos (ej. `-T rn-bridge` o `-T tk1 -T tk2`).
+- `-P, --preset, --profile <nombre>`: Presets o perfiles agénticos a activar, separados por coma o repetidos (ej. `-P fullstack` o `-P frontend,data`). `--profile` se mantiene como alias de compatibilidad.
 - `-i, --prompt <texto>`: Prompt inicial inyectado al agente de IA.
 - `-d, --dir <ruta>`: Directorio de trabajo base (predeterminado: directorio actual).
 
@@ -71,57 +72,63 @@ gz-ia chat [flags]
 # Chat supervisado estándar
 gz-ia chat -p agy
 
-# Chat con perfil agéntico frontend activado
-gz-ia chat -p agy -P frontend
+# Chat activando toolkits modulares específicos (-T)
+gz-ia chat -p agy -T frontend -T backend
 
-# Chat autónomo con múltiples perfiles y prompt inicial
-gz-ia chat -p claude -m autonomous -P frontend,data -i "Refactorizar internal/logger"
+# Chat con un preset de capacidades (-P)
+gz-ia chat -p agy -P fullstack
+
+# Chat autónomo combinando preset, toolkit modular y prompt inicial
+gz-ia chat -p claude -m autonomous -P fullstack -T e2e-testing -i "Refactorizar internal/logger"
 ```
 
 ---
 
-### `gz-ia profile`
+### `gz-ia toolkit`
 
-Gestiona perfiles agénticos y explora el catálogo unificado de skills.
+Gestiona toolkits modulares, presets agénticos y explora el catálogo unificado de skills.  
+*Aliases aceptados:* `toolkits`, `profile`, `profiles`.
 
-#### `gz-ia profile list`
-Lista todos los perfiles agénticos disponibles (combinando ámbito global `~/.config/gz-ia/profiles` y proyecto `.harness/profiles`). Si detecta colisión de nombres entre ambos ámbitos, falla de inmediato para evitar comportamientos no deterministas.
+#### `gz-ia toolkit list`
+Lista todos los toolkits modulares registrados y presets agénticos disponibles (combinando ámbito global `~/.config/gz-ia/tooling` y de proyecto `.harness/toolkits`). Muestra la cantidad de skills, tools y su ámbito.
 
 ```bash
-gz-ia profile list [-d <directorio>]
+gz-ia toolkit list [-d <directorio>]
 ```
 
-#### `gz-ia profile show <name>`
-Muestra la definición detallada del perfil, incluyendo descripción, archivo de directivas (`*-AGENTS.md`), lista de skills requeridas y servidores MCP asociados.
+#### `gz-ia toolkit show <id>`
+Muestra la definición detallada de un toolkit o preset: identificador, descripción, ámbito, directivas (`AGENTS.md`), reglas (`rules/`), skills, herramientas MCP ejecutables (`tools.json`) y servidores MCP asociados.
 
 ```bash
-gz-ia profile show <nombre> [-d <directorio>]
+gz-ia toolkit show <id> [-d <directorio>]
 ```
 
-#### `gz-ia profile create <name>`
-Crea una nueva carpeta de perfil con un `perfil.json` preconfigurado y plantilla de archivo de directivas opcional.
+#### `gz-ia toolkit create <id>` (alias: `init`)
+Crea el scaffolding inicial para un nuevo toolkit modular con su estructura estándar: `toolkit.json`, directivas maestras (`AGENTS.md`), regla de ejemplo (`rules/example.md`), habilidad de ejemplo (`skills/example/SKILL.md`) y declaración de herramienta (`tools.json`).
 
 ```bash
-gz-ia profile create <nombre> [--desc <descripción>] [--agents-file <archivo>] [--global] [-d <directorio>]
+gz-ia toolkit create <id> [--desc <descripción>] [--global] [-d <directorio>]
+# o mediante su alias:
+gz-ia toolkit init <id> [--desc <descripción>] [--global] [-d <directorio>]
 ```
 
 **Banderas:**
-- `--desc <texto>`: Descripción legible del perfil agéntico.
-- `--agents-file <archivo>`: Nombre del archivo de directivas específico (ej. `FRONT-AGENTS.md`, `DATA-AGENTS.md`).
-- `--global`: Crea el perfil en `~/.config/gz-ia/profiles` en lugar de la carpeta del proyecto actual (`.harness/profiles`).
+- `--desc <texto>`: Descripción legible del toolkit modular.
+- `--global`: Crea el toolkit en el catálogo global de usuario (`~/.config/gz-ia/tooling/toolkits/<id>`) en lugar del proyecto actual (`.harness/toolkits/<id>`).
+- `-d, --dir <ruta>`: Directorio del proyecto de destino.
 
-#### `gz-ia profile skills`
-Explora todas las habilidades descubiertas en los catálogos global y de proyecto, agrupadas automáticamente por categoría extraída de su prefijo (`front-*`, `data-*`, `back-*`, `devops-*`).
+#### `gz-ia toolkit skills`
+Explora todas las habilidades descubiertas en los toolkits disponibles en el entorno, detallando su nombre, categoría inferida por prefijo (`front-*`, `data-*`, `back-*`, `devops-*`), toolkit contenedor, ámbito y descripción.
 
 ```bash
-gz-ia profile skills [-d <directorio>]
+gz-ia toolkit skills [-d <directorio>]
 ```
 
-#### `gz-ia profile path [name]`
-Imprime en `stdout` la ruta absoluta al directorio del perfil especificado o al catálogo de perfiles del proyecto. Salida limpia para scripts de shell (`cd $(gz-ia profile path frontend)`).
+#### `gz-ia toolkit path [id]`
+Imprime en `stdout` la ruta absoluta al directorio del toolkit especificado o al catálogo de toolkits del proyecto (`.harness/toolkits`). Diseñado para scripting limpio de shell (`cd $(gz-ia toolkit path frontend)`).
 
 ```bash
-gz-ia profile path [nombre] [-d <directorio>]
+gz-ia toolkit path [id] [-d <directorio>]
 ```
 
 ---
@@ -316,7 +323,7 @@ gz-ia mcp [flags]
 **Banderas (Flags):**
 - `--session <id>`: Identificador de la sesión de trabajo activa. Si la sesión es aislada, opera en su worktree `.harness/worktrees/<id>`.
 - `--tooling <ruta>`: Directorio de tooling global (por defecto `~/.config/gz-ia/tooling`).
-- `-P, --profile <nombre>`: Perfil agéntico de tooling a activar.
+- `-P, --preset, --profile <nombre>`: Preset o perfil agéntico de tooling a activar.
 - `--toolkit <id>`: Toolkits específicos a incorporar al microkernel.
 - `--allow-get`: Permite exponer la herramienta `worktree_get` al agente (por defecto `false` por seguridad).
 - `-d, --dir <ruta>`: Directorio de trabajo base.

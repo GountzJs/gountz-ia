@@ -28,7 +28,7 @@ En lugar de dejar que los agentes modifiquen directamente tu espacio de trabajo 
 - **Aislamiento en Git Worktrees:** Cada sesión trabaja en su propia rama temporal (`harness/<id>`) y directorio desacoplado, sin ensuciar tu rama base ni bloquear tu entorno.
 - **Flujo Humano `read` & `get`:** Inspecciona el progreso del agente con `session read` y fusiona cambios controlados a tu rama activa con `session get`.
 - **TUI Interactiva + CLI-First:** Navega con una interfaz visual basada en Bubble Tea y formularios Huh (`gz-ia start`), o automatiza todo mediante subcomandos de terminal estándar con salida JSON.
-- **Perfiles Componibles (`-P`):** Modela roles de desarrollo (`frontend`, `backend`, `devops`, `security`) inyectando system prompts e instrucciones automáticas.
+- **Toolkits Modulares & Presets Componibles (`-T`, `-P`):** Modela capacidades y roles de desarrollo componiendo toolkits atómicos (reglas, skills, herramientas MCP con circuit breaker y directivas) en perfiles emergentes.
 - **Microkernel Orchy & Servidor MCP:** Servidor Model Context Protocol nativo por Stdio (JSON-RPC 2.0) con protección por Circuit Breaker (Honest Kernel).
 - **Vault Seguro de Secretos:** Almacén centralizado (`.harness/vault.json`, permisos `0600`, ignorado por Git) para API keys y variables de entorno, con detección automática de variables faltantes al iniciar sesiones.
 - **Observabilidad y Métricas:** Registro estructurado de eventos (`READ` $\to$ `PENDING` $\to$ `FINISH`) y auditoría de consumo de tokens y llamadas a herramientas.
@@ -90,7 +90,7 @@ gz-ia version
 
 ### 1. Interfaz Interactiva (TUI)
 
-Lanza la TUI interactiva para seleccionar agentes, crear perfiles o gestionar sesiones visualmente:
+Lanza la TUI interactiva para seleccionar agentes, inicializar toolkits o gestionar sesiones visualmente:
 
 ```bash
 gz-ia start
@@ -113,13 +113,20 @@ gz-ia chat -p claude -m supervised -i "Refactorizar capa de persistencia"
 gz-ia chat -p opencode -m autonomous -i "Solucionar fallas en tests unitarios"
 ```
 
-### 3. Usar Perfiles de Especialidad (`-P`)
+### 3. Toolkits Modulares y Presets Componibles (`-T`, `-P`)
 
-Define o reutiliza perfiles que inyectan contexto e instrucciones preconfiguradas:
+Activa toolkits atómicos específicos (`-T`) o presets componibles (`-P`) que inyectan directivas, reglas, skills y herramientas MCP con Circuit Breaker:
 
 ```bash
-gz-ia chat -p agy -P frontend -i "Optimizar renderizado de componentes"
-gz-ia chat -p agy -P security -i "Auditar dependencias en busca de vulnerabilidades"
+# Chat activando toolkits modulares específicos (-T)
+gz-ia chat -p agy -T frontend -T backend -i "Optimizar renderizado y capa API"
+
+# Chat activando un preset preconfigurado (-P)
+gz-ia chat -p agy -P fullstack -i "Implementar flujo de autenticación"
+
+# Gestión y scaffolding de toolkits desde la CLI
+gz-ia toolkit list
+gz-ia toolkit create mobile --desc "Desarrollo Móvil Flutter y React Native"
 ```
 
 ### 4. Inspección y Fusión Segura de Cambios
@@ -203,8 +210,7 @@ gountz-ia/
 │   ├── features/
 │   │   ├── session/            # Orquestador de sesiones y drivers multi-agente
 │   │   ├── workspace/          # Gestor de Git Worktrees, guardrails, diffs y manifiestos
-│   │   ├── profile/            # Definición y composición de perfiles agénticos
-│   │   ├── tooling/            # Tooling modular, toolkits componibles y proyección en worktree
+│   │   ├── tooling/            # Toolkits modulares atómicos, presets componibles y proyección en worktree
 │   │   ├── vault/              # Almacén seguro de secretos y variables de entorno del proyecto
 │   │   ├── logger/             # Event bus y logger append-only (.events.jsonl)
 │   │   ├── metrics/            # Agregador de telemetría y analizador de transcripts
