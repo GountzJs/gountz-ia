@@ -18,7 +18,7 @@ Guía detallada de sintaxis, argumentos, banderas y códigos de retorno de todos
 | [`gz-ia toolkit path`](#gz-ia-toolkit) | `[id]`<br>`-d, --dir` | N/A | Imprime la ruta al directorio del toolkit o del catálogo local. |
 | [`gz-ia session list`](#gz-ia-session-list) | `-d, --dir` | N/A | Lista en formato tabular todas las sesiones del proyecto. |
 | [`gz-ia session show`](#gz-ia-session-show) | `<id>`<br>`-d, --dir` | N/A | Muestra la metadata detallada y estado de una sesión. |
-| [`gz-ia session kill`](#gz-ia-session-kill) | `<id>`<br>`-d, --dir` | N/A | Termina de forma controlada el proceso de una sesión (`SIGTERM` + `SIGKILL`). |
+| [`gz-ia session kill`](#gz-ia-session-kill) | `<id>`<br>`-d, --dir` | N/A | Termina de forma controlada el proceso de una sesión (`SIGTERM` + `SIGKILL` en Unix / `taskkill` en Windows). |
 | [`gz-ia session resume`](#gz-ia-session-resume) | `<id>`<br>`-d, --dir` | Heredado de la sesión | Reanuda una sesión previa invocando al agente nativo (`--continue`/`--resume`). |
 | [`gz-ia session delete`](#gz-ia-session-delete) | `<id>`<br>`-d, --dir` | N/A | Elimina el registro persistente y destruye el worktree y la rama asociada. |
 | [`gz-ia session path`](#gz-ia-session-path) | `<id>`<br>`-d, --dir` | N/A | Imprime en `stdout` la ruta absoluta del espacio de trabajo. |
@@ -90,7 +90,7 @@ Gestiona toolkits modulares, presets agénticos y explora el catálogo unificado
 *Aliases aceptados:* `toolkits`, `profile`, `profiles`.
 
 #### `gz-ia toolkit list`
-Lista todos los toolkits modulares registrados y presets agénticos disponibles (combinando ámbito global `~/.config/gz-ia/tooling` y de proyecto `.harness/toolkits`). Muestra la cantidad de skills, tools y su ámbito.
+Lista todos los toolkits modulares registrados y presets agénticos disponibles (combinando ámbito global `~/.config/gz-ia/tooling` y de proyecto `.gz-ia/toolkits` o `toolkits/`). Muestra la cantidad de skills, tools y su ámbito.
 
 ```bash
 gz-ia toolkit list [-d <directorio>]
@@ -114,7 +114,7 @@ gz-ia toolkit init <id> [--desc <descripción>] [--global] [-d <directorio>]
 
 **Banderas:**
 - `--desc <texto>`: Descripción legible del toolkit modular.
-- `--global`: Crea el toolkit en el catálogo global de usuario (`~/.config/gz-ia/tooling/toolkits/<id>`) en lugar del proyecto actual (`.harness/toolkits/<id>`).
+- `--global`: Crea el toolkit en el catálogo global de usuario (`~/.config/gz-ia/tooling/toolkits/<id>`) en lugar del proyecto actual (`.gz-ia/toolkits/<id>`).
 - `-d, --dir <ruta>`: Directorio del proyecto de destino.
 
 #### `gz-ia toolkit skills`
@@ -125,7 +125,7 @@ gz-ia toolkit skills [-d <directorio>]
 ```
 
 #### `gz-ia toolkit path [id]`
-Imprime en `stdout` la ruta absoluta al directorio del toolkit especificado o al catálogo de toolkits del proyecto (`.harness/toolkits`). Diseñado para scripting limpio de shell (`cd $(gz-ia toolkit path frontend)`).
+Imprime en `stdout` la ruta absoluta al directorio del toolkit especificado o al catálogo de toolkits del proyecto (`.gz-ia/toolkits`). Diseñado para scripting limpio de shell (`cd $(gz-ia toolkit path frontend)`).
 
 ```bash
 gz-ia toolkit path [id] [-d <directorio>]
@@ -161,7 +161,7 @@ Detiene forzosamente el proceso del agente de la sesión.
 gz-ia session kill <session-id> [-d <ruta>]
 ```
 
-Envía `SIGTERM` y escala a `SIGKILL` si no finaliza dentro del tiempo de espera.
+Envía `SIGTERM` al grupo de procesos y escala a `SIGKILL` si no finaliza dentro del tiempo de espera (en Windows ejecuta `taskkill /F /T` para terminar el árbol de procesos de forma garantizada).
 
 ---
 
@@ -348,7 +348,7 @@ gz-ia update [flags]
 
 ### `gz-ia version`
 
-Muestra la información de versión del binario compiled.
+Muestra la información de versión del binario compilado.
 
 ```bash
 gz-ia version

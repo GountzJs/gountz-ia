@@ -7,8 +7,9 @@ Esta guía te conducirá paso a paso para instalar, verificar y ejecutar tu prim
 ## 1. Prerrequisitos y Plataformas
 
 - **Plataformas Soportadas:**
-  - **Linux:** Distribuciones modernas de 64 bits (Ubuntu, Debian, Fedora, Arch, etc.).
-  - **Windows:** Soporte para Windows (amd64 / x86_64).
+  - **Linux:** Distribuciones modernas de 64 bits (Ubuntu, Debian, Fedora, Arch, etc.) — *Soporte completo*.
+  - **macOS:** Apple Silicon / Intel — *En fase de validación*.
+  - **Windows:** Soporte parcial para Windows (amd64 / x86_64; terminal nativa con gestión de procesos vía `taskkill` y ciertas limitaciones de PTY).
 - **Git:** Versión `2.20+` con soporte de `git worktree`.
 - **Al menos un agente de terminal instalado:**
   - [Google Antigravity (`agy`)](/guide/providers#google-antigravity-agy)
@@ -22,9 +23,16 @@ Esta guía te conducirá paso a paso para instalar, verificar y ejecutar tu prim
 
 ::: code-group
 
-```bash [GitHub (Recomendado)]
-# Instalación automática para Linux (amd64)
+```bash [Linux / macOS (curl)]
+# Instalación automática para Linux / macOS (amd64 / arm64)
 curl -fsSL https://raw.githubusercontent.com/GountzJs/gountz-ia/main/install.sh | bash
+```
+
+```powershell [Windows (PowerShell)]
+# Descargar el zip de la release más reciente desde GitHub
+Invoke-WebRequest -Uri "https://github.com/GountzJs/gountz-ia/releases/latest/download/gz-ia_Windows_x86_64.zip" -OutFile "gz-ia.zip"
+Expand-Archive -Path "gz-ia.zip" -DestinationPath "$HOME\bin"
+# Asegúrate de que $HOME\bin esté agregado a tu variable PATH del sistema
 ```
 
 ```bash [Compilación desde código (Make)]
@@ -56,7 +64,7 @@ Comprueba que el binario responda adecuadamente con su versión:
 
 ```bash
 $ gz-ia version
-✦ gz-ia v0.0.2 (commit: ceed405, date: 2026-09-26T20:40:19Z)
+✦ gz-ia v0.1.0 (commit: ceed405, date: 2026-09-27T20:40:19Z)
 ```
 
 ---
@@ -136,21 +144,55 @@ Nota: Los cambios quedaron preparados en el stage sin comitear (--no-commit).
 
 ## 6. Consideraciones Prácticas de Entorno
 
-### Exclusión de `.harness/` en herramientas de análisis
-Para evitar que linters, Jest, compiladores TypeScript o watchers de IDE indexen los archivos duplicados en los worktrees:
-- **`tsconfig.json`:** Agrega `".harness"` al array `"exclude"`:
+### Exclusión de `.harness/` en herramientas de análisis y bundlers
+
+Al residir los worktrees en `.harness/worktrees/<id>` dentro del árbol del repositorio, las herramientas de build y testing del frontend encontrarán copias idénticas del código fuente y de `package.json`. Configura las siguientes exclusiones:
+
+- **Jest (`jest.config.js`):** Cada worktree duplica el `package.json`, provocando el error `Haste module naming collision`. Ignora `.harness/`:
+  ```javascript
+  module.exports = {
+    modulePathIgnorePatterns: ['<rootDir>/.harness/'],
+  };
+  ```
+- **ESLint Flat Config (`eslint.config.js`):** Ignora el árbol de worktrees:
+  ```javascript
+  export default [
+    {
+      ignores: ['**/.harness/**'],
+    },
+    // ... resto de tu configuración
+  ];
+  ```
+- **Tailwind CSS (`tailwind.config.js`):** Evita escanear clases de trabajo en progreso:
+  ```javascript
+  module.exports = {
+    content: ['./src/**/*.{ts,tsx}', '!./.harness/**'],
+  };
+  ```
+- **Vite (`vite.config.ts`):** Previene recargas automáticas (HMR) cuando el agente edita en su worktree:
+  ```typescript
+  server: {
+    watch: {
+      ignored: ['**/.harness/**'],
+    },
+  },
+  ```
+- **TypeScript (`tsconfig.json`):** Agrega `".harness"` al array `"exclude"`:
   ```json
   {
     "exclude": ["node_modules", ".harness"]
   }
   ```
 - **Exclusión Git:** `gz-ia` registra automáticamente `.harness/` en `.git/info/exclude` del repositorio local para que permanezca ignorado sin ensuciar tu archivo `.gitignore` compartido.
-- **ESLint / IDE Watchers / Vite:** Incluye `.harness/**` en los patrones ignorados (por ejemplo, `server.watch.ignored: ['**/.harness/**']` en Vite) para prevenir recargas innecesarias.
+
+::: warning El costo de diseño de worktrees locales
+Mantener los worktrees dentro de `.harness/worktrees/` aporta portabilidad y no requiere permisos fuera del proyecto. Sin embargo, su contrapartida es que las configuraciones compartidas del equipo (`tsconfig`, `jest.config`, `vite.config`, etc.) deben declarar la exclusión explícita de `.harness/` para no sufrir colisiones de paquetes ni recargas innecesarias.
+:::
 
 ### Gestión de Dependencias (Proyectos Node / Frontend)
 Dado que cada worktree es un árbol de archivos separado, no comparte automáticamente la carpeta `node_modules`:
 - En proyectos con dependencias pesadas, se recomienda usar gestores con cache y enlaces globales como **pnpm** o **bun** para evitar instalaciones lentas.
-- Opcionalmente, puedes crear un symlink al `node_modules` de la raíz subiendo tres niveles (`ln -s $(gz-ia session path <id>)/../../../node_modules $(gz-ia session path <id>)/node_modules`). Asegúrate de que tu `.gitignore` tenga `node_modules` sin barra final para no commitear el symlink.
+- Opcionalmente, puedes crear un symlink al `node_modules` de la raíz subiendo tres niveles (`ln -s $(gz-ia session path <id>)/../../../node_modules $(gz-ia session path <id>)/node_modules`). Asegúrate de que tu `.gitignore` tenga `node_modules` sin barra final (`node_modules` en vez de `node_modules/`) para evitar que Git rastree el enlace simbólico como un archivo regular.
 
 ---
 

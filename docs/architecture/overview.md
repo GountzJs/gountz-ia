@@ -83,10 +83,10 @@ El núcleo operativo de la CLI de `gz-ia`, completamente desacoplado de la termi
 
 - **`session` (`internal/features/session`):** Orquesta el ciclo de vida de cada sesión, gestiona los drivers de los agentes (`agy`, `claude`, `opencode`, `pi-agent`), controla procesos en segundo plano y almacena atómicamente la metadata en `.harness/sessions/<id>.json`.
 - **`workspace` (`internal/features/workspace`):** Administra el ciclo de vida de los **Git Worktrees** efímeros, la creación de ramas `harness/<id>`, el manifiesto de proyección atómico (`.manifest.json`) y el fallback seguro en directorios planos si Git no está inicializado.
-- **`vault` (`internal/features/vault`):** Almacén seguro de secretos y variables de entorno centralizadas (`.harness/vault.json` con permisos `0600`), enmascaramiento de valores y detección automática de credenciales faltantes.
+- **`vault` (`internal/features/vault`):** Variables de entorno y secretos locales (`.harness/vault.json` con permisos POSIX `0600`), enmascaramiento en la salida de terminal e inyección en sesiones activas.
 - **`tooling` (`internal/features/tooling`):** Gestión y composición de perfiles agénticos y toolkits modulares (`tooling/config.json`, directivas `AGENTS.md`, `rules/`, `skills/` y registro dinámico de herramientas en el microkernel).
 - **`logger` (`internal/features/logger`):** Captura y persiste el log estructurado de etapas de razonamiento y acciones en formato JSONL (`.events.jsonl`).
-- **`metrics` (`internal/features/metrics`):** Agrega y analiza métricas de ejecución: duración total, pasos completados, consumo de tokens (input, output, caché) y llamadas a herramientas por cada agente y subagente.
+- **`metrics` (`internal/features/metrics`):** Agrega y analiza métricas de ejecución: duración total, pasos completados, llamadas a herramientas y desglose de consumo de tokens (input, output, caché) para agentes con telemetría estructurada local (Google Antigravity `agy` a través de sus logs de transcripción).
 - **`updater` (`internal/features/updater`):** Comprueba actualizaciones y nuevas versiones publicadas en GitHub Releases, gestiona descargas y reemplaza atómicamente el ejecutable.
 
 ### 3. Microkernel Orchy (`packages/orchy/`)
@@ -94,7 +94,7 @@ El núcleo operativo de la CLI de `gz-ia`, completamente desacoplado de la termi
 Un paquete autónomo y reutilizable ubicado en `packages/orchy` que provee:
 
 - **Inversión de Control (IoC):** `ServiceContainer` y `KernelContext` para registrar dependencias desacopladas.
-- **Honest Microkernel & Circuit Breaker:** Supervisa el estado de salud de cada herramienta registrada (`HEALTHY`, `DEGRADED`, `DEAD`) mediante `ToolProxy`.
+- **Honest Microkernel & Circuit Breaker:** Supervisa el estado de salud de cada herramienta registrada (`HEALTHY`, `DEGRADED`, `DEAD`) mediante `ToolProxy` para garantizar aislamiento de fallos en memoria sin detener el proceso.
 - **Servidor MCP Nativo:** Exposición de herramientas a cualquier agente compatible con el protocolo MCP (Model Context Protocol) a través de canales estándar (`io.Reader` / `io.Writer`).
 - **Baterías Incluidas:** Plugins de worktrees para inspección segura (`worktree_read` expuesta a agentes por defecto) e integración controlada (`worktree_get`).
 
@@ -105,12 +105,12 @@ Un paquete autónomo y reutilizable ubicado en `packages/orchy` que provee:
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User as "Usuario / Terminal"
-    participant CLI as "gz-ia CLI"
-    participant Driver as "Multi-Driver (agy/claude)"
-    participant Work as "Workspace Provider"
-    participant Git as "Git Engine"
-    participant Store as "Session Store (.harness/)"
+    actor User as Usuario
+    participant CLI as gz-ia CLI
+    participant Driver as Multi-Driver (agy/claude)
+    participant Work as Workspace Provider
+    participant Git as Git Engine
+    participant Store as Session Store (.harness)
 
     User->>CLI: gz-ia chat -p agy -m supervised
     CLI->>Driver: Resolver y validar binario (LookPath)
@@ -128,3 +128,11 @@ sequenceDiagram
     CLI->>Store: Complete SessionRecord COMPLETED
     CLI->>User: Sesion completada con exito
 ```
+
+### Resumen del Flujo de Ejecución
+
+1. **Resolución de agente:** La CLI comprueba que el binario del driver solicitado esté instalado en `$PATH`.
+2. **Aislamiento en Worktree:** Se crea una rama efímera `harness/{id}` y un directorio worktree desacoplado en `.harness/worktrees/{id}`.
+3. **Registro de Sesión:** Se crea el archivo de estado con estatus `RUNNING`.
+4. **Ejecución Supervisada:** El agente interactúa mediante su PTY nativa dentro del worktree sin tocar el workspace principal.
+5. **Cierre y Telemetría:** Al finalizar el proceso, la CLI actualiza el registro a `COMPLETED` y recopila las métricas de ejecución.

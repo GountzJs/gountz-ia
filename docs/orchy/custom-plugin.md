@@ -220,6 +220,7 @@ Una de las mayores virtudes de Orchy es que **no requiere ningún código extra*
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 
@@ -231,17 +232,18 @@ func main() {
 	// 1. Inicializar el Microkernel
 	kernel := orchy.NewKernel()
 
-	// 2. Registrar el Plugin en el contexto del Kernel
+	// 2. Registrar el Plugin en el Kernel
 	dbPlugin := database.NewDatabasePlugin("postgres://localhost:5432/app")
-	if err := kernel.GetContext().Plugins().Register(dbPlugin); err != nil {
+	if err := kernel.Use(dbPlugin); err != nil {
 		log.Fatalf("Fallo al registrar plugin: %v", err)
 	}
 
 	// 3. Arrancar el Microkernel (ejecuta OnBoot de todos los plugins)
-	if err := kernel.Boot(); err != nil {
+	ctx := context.Background()
+	if err := kernel.Boot(ctx); err != nil {
 		log.Fatalf("Error durante el arranque del kernel: %v", err)
 	}
-	defer kernel.Shutdown()
+	defer kernel.Shutdown(ctx)
 
 	// 4. Instanciar e iniciar el servidor MCP sobre Stdio
 	mcpServer := orchy.NewMcpServer(kernel, os.Stdin, os.Stdout)

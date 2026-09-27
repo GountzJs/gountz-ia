@@ -13,18 +13,21 @@ El plugin se acopla directamente al ciclo de vida del kernel Orchy:
 
 ```go
 import (
+    "context"
+
     "gz-ia/packages/orchy"
     "gz-ia/packages/orchy/batteries/worktree"
 )
 
 func main() {
+    ctx := context.Background()
     kernel := orchy.NewKernel()
     
     // Registrar el plugin de baterías de worktree (solo worktree_read por defecto)
     wtPlugin := worktree.NewWorktreePlugin("/path/al/proyecto")
-    kernel.GetContext().Plugins.Register(wtPlugin)
+    _ = kernel.Use(wtPlugin)
 
-    _ = kernel.Boot()
+    _ = kernel.Boot(ctx)
     // La herramienta 'worktree_read' queda registrada en el ToolRegistry.
     // 'worktree_get' solo se registraría si se pasa worktree.WithAllowAgentGet(true).
 }

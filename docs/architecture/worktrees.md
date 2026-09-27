@@ -149,10 +149,24 @@ gz-ia session get a8f1b2c3 --no-commit
 
 ## Consideraciones Prácticas: Watchers, Linters, Dependencias y Plataformas
 
-### 1. Exclusión de `.harness/` en herramientas de análisis
-Dado que cada worktree contiene una copia de los archivos del proyecto, es recomendable tener en cuenta la interacción con herramientas de análisis estático y watchers:
+### 1. Exclusión de `.harness/` en herramientas de análisis y bundlers
+Dado que cada worktree contiene una copia de los archivos del proyecto, es fundamental configurar las exclusiones en las herramientas del proyecto para evitar indexaciones innecesarias o fallos de compilación:
 
 - **Exclusión limpia vía `.git/info/exclude`:** `gz-ia` añade automáticamente `.harness/` a `.git/info/exclude` (resuelto nativamente con `git rev-parse --git-path info/exclude`). De esta manera, tu `git status` permanece completamente limpio sin modificar el archivo `.gitignore` compartido del proyecto ni generar commits accidentales.
+- **Jest (`jest.config.js`):** Cada worktree copia el `package.json`, provocando el error `Haste module naming collision`. Ignora `.harness/`:
+  ```javascript
+  module.exports = {
+    modulePathIgnorePatterns: ['<rootDir>/.harness/'],
+  };
+  ```
+- **ESLint Flat Config (`eslint.config.js`):**
+  ```javascript
+  export default [
+    {
+      ignores: ['**/.harness/**'],
+    },
+  ];
+  ```
 - **TypeScript (`tsconfig.json`):** Si compilas todo el proyecto (`tsc -b`), añade la exclusión para evitar que el compilador indexe tipos duplicados dentro de `.harness`:
   ```json
   {
@@ -169,9 +183,12 @@ Dado que cada worktree contiene una copia de los archivos del proyecto, es recom
     }
   })
   ```
-- **Tailwind CSS:** Evita globs genéricos sobre la raíz (`./**/*.{ts,tsx}`) que escanean copias dentro de `.harness/worktrees/`; delimita el content a las carpetas de código fuente (ej. `./src/**/*.{ts,tsx}`).
-- **ESLint / Biome / Jest / Vitest:** Asegúrate de incluir `.harness/**` en los patrones de archivos ignorados (`ignorePatterns`).
+- **Tailwind CSS:** Evita globs genéricos sobre la raíz (`./**/*.{ts,tsx}`) que escanean copias dentro de `.harness/worktrees/`; delimita el content a las carpetas de código fuente (ej. `./src/**/*.{ts,tsx}`, `!./.harness/**`).
 - **File Watchers en IDEs:** En VS Code o JetBrains, excluye `.harness/` en `files.watcherExclude` para reducir consumo innecesario de memoria y CPU.
+
+::: warning El compromiso de diseño de los worktrees locales
+La decisión de almacenar los worktrees dentro del repositorio (`.harness/worktrees/`) aporta aislamiento autónomo y portabilidad absoluta sin requerir permisos fuera del árbol ni directorios temporales arbitrarios. Su contrapartida explícita es la fricción en configuraciones compartidas de frontend (`jest.config`, `tsconfig`, `vite.config`, etc.), que deben ignorar expresamente `.harness/` para evitar colisiones.
+:::
 
 ### 2. Gestión de Dependencias (Node / Frontend)
 En proyectos Node/Frontend, un worktree nuevo no hereda `node_modules` automáticamente al ser un árbol de archivos separado:

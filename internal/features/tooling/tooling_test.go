@@ -377,13 +377,13 @@ func TestToolingService_CreateToolkitScaffold(t *testing.T) {
 		t.Errorf("Scope esperado 'project', obtenido: %s", tkProj.Scope)
 	}
 
-	// Verificar archivos generados
+	// Verificar archivos generados en .gz-ia/toolkits por defecto
 	expectedProjFiles := []string{
-		filepath.Join(projDir, ".harness", "toolkits", "backend-go", "toolkit.json"),
-		filepath.Join(projDir, ".harness", "toolkits", "backend-go", "AGENTS.md"),
-		filepath.Join(projDir, ".harness", "toolkits", "backend-go", "rules", "example.md"),
-		filepath.Join(projDir, ".harness", "toolkits", "backend-go", "skills", "example", "SKILL.md"),
-		filepath.Join(projDir, ".harness", "toolkits", "backend-go", "tools.json"),
+		filepath.Join(projDir, ".gz-ia", "toolkits", "backend-go", "toolkit.json"),
+		filepath.Join(projDir, ".gz-ia", "toolkits", "backend-go", "AGENTS.md"),
+		filepath.Join(projDir, ".gz-ia", "toolkits", "backend-go", "rules", "example.md"),
+		filepath.Join(projDir, ".gz-ia", "toolkits", "backend-go", "skills", "example", "SKILL.md"),
+		filepath.Join(projDir, ".gz-ia", "toolkits", "backend-go", "tools.json"),
 	}
 	for _, f := range expectedProjFiles {
 		if _, statErr := os.Stat(f); statErr != nil {

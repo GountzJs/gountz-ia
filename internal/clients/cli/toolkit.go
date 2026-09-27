@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -50,7 +51,7 @@ func newToolkitCmd() *cobra.Command {
 
 			icons := tui.GetIcons()
 			if len(toolkits) == 0 && len(presets) == 0 {
-				fmt.Fprintln(c.OutOrStdout(), lipgloss.NewStyle().Foreground(tui.ColorMuted).Render(fmt.Sprintf("%s No hay toolkits ni presets registrados en el proyecto (.harness/toolkits) ni globalmente (~/.config/gz-ia/tooling).", icons.Sparkle)))
+				fmt.Fprintln(c.OutOrStdout(), lipgloss.NewStyle().Foreground(tui.ColorMuted).Render(fmt.Sprintf("%s No hay toolkits ni presets registrados en el proyecto (.gz-ia/toolkits) ni globalmente (~/.config/gz-ia/tooling).", icons.Sparkle)))
 				return nil
 			}
 
@@ -239,7 +240,18 @@ func newToolkitCmd() *cobra.Command {
 			svc := getToolingService(workDir)
 
 			if len(args) == 0 {
-				fmt.Fprintln(c.OutOrStdout(), filepath.Join(svc.ProjectDir(), ".harness", "toolkits"))
+				defaultDir := filepath.Join(svc.ProjectDir(), ".gz-ia", "toolkits")
+				toolkitsDir := filepath.Join(svc.ProjectDir(), "toolkits")
+				harnessDir := filepath.Join(svc.ProjectDir(), ".harness", "toolkits")
+				if fi, err := os.Stat(defaultDir); err == nil && fi.IsDir() {
+					fmt.Fprintln(c.OutOrStdout(), defaultDir)
+				} else if fi, err := os.Stat(toolkitsDir); err == nil && fi.IsDir() {
+					fmt.Fprintln(c.OutOrStdout(), toolkitsDir)
+				} else if fi, err := os.Stat(harnessDir); err == nil && fi.IsDir() {
+					fmt.Fprintln(c.OutOrStdout(), harnessDir)
+				} else {
+					fmt.Fprintln(c.OutOrStdout(), defaultDir)
+				}
 				return nil
 			}
 

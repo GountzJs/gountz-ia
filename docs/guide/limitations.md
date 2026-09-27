@@ -33,14 +33,23 @@ El Vault local almacena variables en texto plano JSON bajo `.harness/vault.json`
 - **Inyección completa:** Todas las variables del vault se inyectan en el entorno (`env`) del agente en cada sesión, por lo que comandos como `env` o `printenv` las exponen.
 - **Acceso relativo:** Desde el worktree de la sesión (`.harness/worktrees/<id>`), el archivo reside a dos niveles de distancia (`../../vault.json`). No almacenes credenciales bancarias ni de infraestructura de producción sin evaluar tu modelo de seguridad local.
 
-### 5. Frontend Watchers y Dependencias en Git Worktrees (`node_modules`)
+### 5. Frontend Watchers, Jest y Dependencias en Git Worktrees (`node_modules`)
 Por diseño de Git, los directorios incluidos en `.gitignore` no se copian al crear un nuevo worktree (`.harness/worktrees/<id>`).
 - **Colisiones con Watchers (Vite, Webpack, Tailwind):** Los dev servers que vigilan todo el directorio o escaneos con globs tipo `./**/*.{ts,tsx}` detectan las modificaciones del agente dentro de `.harness/worktrees/`, provocando recargas en caliente continuas o clases CSS duplicadas.
-  - *Solución:* Añade en `vite.config.ts`:
+  - *Solución en Vite (`vite.config.ts`):*
     ```ts
     server: { watch: { ignored: ['**/.harness/**'] } }
     ```
   - *Solución en Tailwind:* Limita el content a `./src/**/*.{ts,tsx}` en lugar de toda la raíz.
+- **Jest y Colisión de Módulos Haste:** Al duplicarse el `package.json` en cada worktree, Jest genera un error `Haste module naming collision`.
+  - *Solución en `jest.config.js`:*
+    ```js
+    modulePathIgnorePatterns: ['<rootDir>/.harness/'],
+    ```
+- **ESLint Flat Config:** Debe ignorar el árbol de sesiones en `eslint.config.js`:
+  ```js
+  export default [{ ignores: ['**/.harness/**'] }];
+  ```
 - **Symlinks y la trampa del trailing slash en `.gitignore`:**
   Si creas un symlink a las dependencias de la raíz, recuerda que son **tres niveles**:
   ```bash

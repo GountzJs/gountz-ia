@@ -82,7 +82,7 @@ gz-ia session show 3f9a12c8
 ```
 
 ### Terminación Forzada (`session kill`)
-Envía de forma segura una señal `SIGTERM` al PID de la sesión y, si el proceso no responde tras un umbral de tiempo, escala a `SIGKILL`, actualizando el estado de la sesión a `KILLED`:
+Envía de forma controlada una señal `SIGTERM` al grupo de procesos de la sesión y, si no responde tras un periodo de gracia, escala a `SIGKILL` (en Windows utiliza `taskkill /F /T` para podar el árbol completo de procesos), actualizando el estado de la sesión a `KILLED`:
 
 ```bash
 gz-ia session kill 3f9a12c8

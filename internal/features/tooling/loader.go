@@ -461,7 +461,7 @@ func (l *Loader) CreateToolkitScaffold(req CreateToolkitRequest) (*Toolkit, erro
 		} else if fi, err := os.Stat(harnessToolkitsDir); err == nil && fi.IsDir() {
 			baseDir = filepath.Join(harnessToolkitsDir, cleanID)
 		} else {
-			baseDir = filepath.Join(harnessToolkitsDir, cleanID)
+			baseDir = filepath.Join(gziaToolkitsDir, cleanID)
 		}
 	}
 

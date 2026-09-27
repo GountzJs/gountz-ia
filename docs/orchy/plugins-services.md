@@ -47,8 +47,7 @@ authPlugin := orchy.NewPlugin(
     "1.0.0",
     func(ctx *core.KernelContext) error {
         // Inicialización en Boot
-        ctx.Services.Register("auth", NewAuthManager())
-        return nil
+        return ctx.RegisterService("auth", NewAuthManager())
     },
     func(ctx *core.KernelContext) error {
         // Limpieza en Shutdown
@@ -56,7 +55,7 @@ authPlugin := orchy.NewPlugin(
     },
 )
 
-kernel.GetContext().Plugins.Register(authPlugin)
+_ = kernel.Use(authPlugin)
 ```
 
 ---
@@ -71,7 +70,7 @@ Permite emitir eventos a múltiples suscriptores asíncronos o síncronos:
 
 ```go
 // Suscribirse a un tópico
-disposable := kernel.GetContext().Events.Subscribe("workspace.modified", func(payload any) {
+disposable := kernel.GetContext().On("workspace.modified", func(payload any) {
     event := payload.(WorkspaceEvent)
     fmt.Printf("Archivo modificado: %s\n", event.Path)
 })
@@ -79,8 +78,8 @@ disposable := kernel.GetContext().Events.Subscribe("workspace.modified", func(pa
 // Desuscribirse cuando no sea necesario
 defer disposable.Dispose()
 
-// Publicar un evento
-kernel.GetContext().Events.Publish("workspace.modified", WorkspaceEvent{Path: "main.go"})
+// Publicar un evento con contexto de cancelación
+_ = kernel.GetContext().Emit(ctx, "workspace.modified", WorkspaceEvent{Path: "main.go"})
 ```
 
 ### 2. Patrón Request/Response (RPC Interno)
@@ -89,10 +88,10 @@ Permite invocar servicios y recibir respuestas sin conocer la implementación co
 
 ```go
 // Registrar un manejador RPC
-kernel.GetContext().Events.RegisterHandler("git.branch.current", func(ctx context.Context, req any) (any, error) {
+_, _ = kernel.GetContext().Respond("git.branch.current", func(ctx context.Context, req any) (any, error) {
     return "main", nil
 })
 
 // Ejecutar la petición
-res, err := kernel.GetContext().Events.Request(ctx, "git.branch.current", nil)
+res, err := kernel.GetContext().Request(ctx, "git.branch.current", nil)
 ```
