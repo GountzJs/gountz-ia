@@ -2,7 +2,7 @@
 
 # Gountz IA (`gz-ia`)
 
-**Universal Terminal AI Harness & Git Worktree Sandbox**
+**Declará tu stack una vez. Usalo con cualquier agente de IA.**
 
 [![Release](https://img.shields.io/github/v/release/GountzJs/gountz-ia?color=38bdf8&logo=github&style=flat-square)](https://github.com/GountzJs/gountz-ia/releases)
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat-square&logo=go)](https://golang.org)
@@ -10,7 +10,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/GountzJs/gountz-ia/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/GountzJs/gountz-ia/actions)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
-*Aísla, orquesta y potencia tus agentes de IA en la terminal con Microkernel Orchy y Git Worktrees.*
+*Comparte toolkits modulares (React, Node, Tailwind, reglas y MCP) entre Antigravity, Claude Code y OpenCode, con control de cambios limpio en Git.*
 
 </div>
 

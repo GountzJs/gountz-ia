@@ -16,6 +16,7 @@ export default withMermaid(
     siteTitle: 'Gountz IA',
     nav: [
       { text: 'Guía', link: '/guide/quickstart', activeMatch: '/guide/' },
+      { text: 'FAQ', link: '/guide/faq' },
       { text: 'Arquitectura', link: '/architecture/overview', activeMatch: '/architecture/' },
       { text: 'Microkernel Orchy', link: '/orchy/microkernel', activeMatch: '/orchy/' },
       { text: 'Referencia CLI & API', link: '/reference/cli', activeMatch: '/reference/' },
@@ -30,15 +31,23 @@ export default withMermaid(
     sidebar: {
       '/guide/': [
         {
-          text: 'Guía de Inicio',
+          text: 'Fundamentos y Producto',
           items: [
             { text: '¿Qué es gz-ia?', link: '/guide/what-is-gz-ia' },
-            { text: 'Inicio Rápido (Quickstart)', link: '/guide/quickstart' },
-            { text: 'Agentes Soportados (Multi-Driver)', link: '/guide/providers' },
+            { text: '¿Para quién es? & FAQ', link: '/guide/faq' },
+            { text: 'Estado y Limitaciones', link: '/guide/limitations' },
+            { text: 'Inicio Rápido (Quickstart)', link: '/guide/quickstart' }
+          ]
+        },
+        {
+          text: 'Uso y Capacidades',
+          items: [
             { text: 'Toolkits y Perfiles Emergentes', link: '/guide/profiles' },
+            { text: 'Agentes Soportados (Multi-Driver)', link: '/guide/providers' },
             { text: 'Gestión de Secretos (Vault)', link: '/guide/vault' },
             { text: 'Uso de la TUI Interactiva', link: '/guide/tui' },
-            { text: 'Flujos de Trabajo del Mundo Real', link: '/guide/workflows' }
+            { text: 'Flujos de Trabajo del Mundo Real', link: '/guide/workflows' },
+            { text: 'Limpieza y Desinstalación', link: '/guide/clean-uninstall' }
           ]
         }
       ],

@@ -21,7 +21,7 @@ En configuraciones tradicionales, los proyectos suelen acumular:
 
 ---
 
-## 2. Anatomía de un Toolkit Modular
+## <span id="anatomia-de-un-toolkit-modular"></span>2. Anatomía de un Toolkit Modular
 
 Cada toolkit vive en su propio directorio dentro del catálogo del proyecto (`.harness/toolkits/<id>`) o del catálogo global del usuario (`~/.config/gz-ia/tooling/toolkits/<id>`):
 
@@ -289,3 +289,99 @@ gz-ia chat -p opencode -P fullstack -T e2e-testing -m autonomous
 ```
 
 El motor de `gz-ia` compondrá la totalidad de las directivas, reglas, skills y herramientas MCP en el entorno aislado del worktree, ofreciendo al agente exactamente el contexto requerido para la tarea.
+
+---
+
+## 8. Glosario de una Pantalla: 4 Conceptos Clave
+
+Para evitar confusiones habituales, esta es la jerarquía del sistema:
+
+| Concepto | Qué representa | Dónde se define | Ejemplo de uso |
+| :--- | :--- | :--- | :--- |
+| **Toolkit** | La unidad atómica de capacidad de un stack (directivas, reglas, skills y MCP). | `.harness/toolkits/<id>` o `~/.config/gz-ia/tooling/toolkits/<id>` | `gz-ia toolkit create rn-tailwind` |
+| **Preset (Perfil)** | Composición conveniente de 1 o más toolkits bajo un nombre agrupador. | `~/.config/gz-ia/tooling/config.json` | `fullstack = frontend + backend` |
+| **Driver** | El adaptador que conecta y traduce comandos hacia un CLI de IA específico. | Código de `gz-ia` (`session.Driver`) | `agy`, `claude`, `opencode`, `pi-agent` |
+| **Sesión** | Una ejecución en un Git Worktree aislado con un agente y toolkits activos. | `.harness/worktrees/<id>` | `gz-ia chat -p agy -P fullstack` |
+
+---
+
+## 9. Ejemplo Real Completo y Copiable: Toolkit React Native + Tailwind
+
+Este es un ejemplo 100% funcional y listo para copiar en tu proyecto. Crea la carpeta `.harness/toolkits/rn-tailwind/` y coloca los siguientes archivos:
+
+### 1. Descriptor del Toolkit (`toolkit.json`)
+```json
+{
+  "id": "rn-tailwind",
+  "description": "Desarrollo Móvil con React Native, NativeWind (Tailwind) y TypeScript",
+  "env": {
+    "EXPO_USE_METRO_WORKSPACE_ROOT": "true",
+    "NODE_ENV": "development"
+  },
+  "mcp_servers": {}
+}
+```
+
+### 2. Directivas Maestras (`AGENTS.md`)
+```markdown
+# Directivas de Desarrollo React Native + Tailwind
+
+Al desarrollar o modificar pantallas y componentes en este proyecto:
+1. Utiliza siempre componentes tipados en TypeScript con interfaces explícitas para Props.
+2. Emplea clases de NativeWind (Tailwind CSS) directamente en la propiedad `className`.
+3. Nunca agregues estilos en línea (`style={{...}}`) salvo para valores dinámicos calculados en runtime (animaciones con Reanimated).
+4. Sigue la convención de componentes atómicos en `src/components/ui/`.
+5. Si encuentras un componente con `StyleSheet.create`, refactorízalo a NativeWind sólo si la tarea explícitamente lo solicita.
+```
+
+### 3. Regla Arquitectónica (`rules/tailwind-standards.md`)
+```markdown
+# Estándares de Clases Tailwind para Móvil
+
+- **Espaciados:** Usa siempre la escala estándar (`p-4`, `m-2`, `gap-3`). No uses valores arbitrarios (`p-[13px]`) salvo justificación de diseño.
+- **Tipografía:**
+  - Títulos: `text-xl font-bold text-gray-900 dark:text-white`
+  - Subtítulos: `text-base font-semibold text-gray-700 dark:text-gray-200`
+  - Cuerpo: `text-sm text-gray-600 dark:text-gray-400`
+- **Flexbox Móvil:** Recuerda que React Native utiliza `flex-col` de forma predeterminada.
+```
+
+### 4. Habilidad Procedimental (`skills/test-maestro/SKILL.md`)
+```markdown
+---
+name: test-maestro
+description: Ejecuta y valida flujos E2E móviles utilizando Maestro CLI
+---
+
+# Guía Operativa de Pruebas E2E con Maestro
+
+Cuando el usuario pida verificar un flujo de usuario o pantalla en emulador:
+1. Comprueba si los flujos están definidos en `.maestro/`.
+2. Para correr el flujo de login:
+   ```bash
+   maestro test .maestro/login-flow.yaml
+   ```
+3. Si el test falla, revisa el screenshot capturado en `.maestro/output/` y corrige los `testID` en los componentes.
+```
+
+### 5. Herramienta Ejecutable con Circuit Breaker (`tools.json`)
+```json
+[
+  {
+    "name": "check_mobile_types",
+    "description": "Ejecuta la comprobación estricta de tipos de TypeScript en el proyecto móvil",
+    "command": "npx tsc --noEmit",
+    "schema": {
+      "type": "object",
+      "properties": {}
+    }
+  }
+]
+```
+
+Con solo guardar esta estructura en `.harness/toolkits/rn-tailwind/`, cualquier desarrollador puede ejecutar:
+```bash
+gz-ia chat -p claude -T rn-tailwind -i "Crear pantalla de Perfil de Usuario con avatar y datos"
+```
+Y Claude Code (o Google Antigravity) recibirá automáticamente todas las directivas de TypeScript, estándares de NativeWind, la habilidad de pruebas Maestro y la herramienta `check_mobile_types`, todo en un worktree aislado sin ensuciar tu editor.
+
