@@ -12,9 +12,9 @@ Esta guía te conducirá paso a paso para instalar, verificar y ejecutar tu prim
 - **Git:** Versión `2.20+` con soporte de `git worktree`.
 - **Al menos un agente de terminal instalado:**
   - [Google Antigravity (`agy`)](/guide/providers#google-antigravity-agy)
-  - [Anthropic Claude Code (`claude`)](/guide/providers#claude-code-claude)
-  - [OpenCode (`opencode`)](/guide/providers#opencode)
-  - [Pi Agent (`pi-agent`)](/guide/providers#pi-agent)
+  - [Anthropic Claude Code (`claude`)](/guide/providers#anthropic-claude-code-claude)
+  - [OpenCode (`opencode`)](/guide/providers#opencode-opencode)
+  - [Pi Agent (`pi-agent`)](/guide/providers#pi-agent-pi-agent)
 
 ---
 

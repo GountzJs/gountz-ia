@@ -13,6 +13,8 @@ flowchart TD
         WS["WorkspaceProvider (Git Worktrees y Aislamiento)"]
         LS["LoggerService (Registro de Eventos .events.jsonl)"]
         MS["MetricsService (Telemetría y Desglose Tokens)"]
+        VS["VaultService (Secretos y Variables de Entorno)"]
+        TS["ToolingService (Toolkits Modulares y Presets)"]
         US["UpdaterService (Actualización Atómica)"]
     end
 
@@ -29,6 +31,8 @@ flowchart TD
     SS --> WS
     SS --> LS
     SS --> MS
+    SS --> VS
+    SS --> TS
     Runner --> Driver
 ```
 
@@ -58,6 +62,8 @@ type Service interface {
     LogEvent(ctx context.Context, evt *logger.Event) error
     GetEvents(ctx context.Context, id string) ([]logger.Event, error)
     WatchEvents(ctx context.Context, id string) (<-chan logger.Event, error)
+    Prune(ctx context.Context) (*PruneResult, error)
+    Vault() vault.Service
 }
 ```
 
@@ -71,6 +77,7 @@ type StartChatRequest struct {
     InitialPrompt   string
     PermissionLevel PermissionLevel
     BinaryPath      string
+    Profiles        []string
     OnLaunch        func(id string, isIsolated bool)
 }
 
@@ -94,6 +101,8 @@ WithKiller(k ProcessKiller) Option
 WithWorkspace(ws workspace.Provider) Option
 WithMetrics(m metrics.Service) Option
 WithLogger(l logger.Service) Option
+WithVault(v vault.Service) Option
+WithTooling(t tooling.Service) Option
 ```
 
 ---
@@ -131,6 +140,7 @@ type SessionRecord struct {
     IsIsolated      bool            `json:"is_isolated"`
     WorktreeDir     string          `json:"worktree_dir,omitempty"`
     BranchName      string          `json:"branch_name,omitempty"`
+    Profiles        []string        `json:"profiles,omitempty"`
 }
 ```
 
@@ -460,3 +470,64 @@ err = os.Rename(tmpFile.Name(), filepath.Join(installDir, "gz-ia"))
 ```
 
 Al utilizar `os.Rename`, la llamada al sistema subyacente `rename(2)` sustituye la entrada en la tabla de inodos del directorio de forma atómica; el proceso activo retiene su descriptor de archivo abierto hasta finalizar su ejecución sin conflicto alguno.
+
+---
+
+## 10. `features/vault.Service` (Gestión Centralizada de Secretos)
+
+Ubicado en `internal/features/vault/service.go`, `model.go` y `store.go`.
+
+### Definición del Contrato
+
+```go
+type Service interface {
+    Get(ctx context.Context, key string) (value string, exists bool, inVault bool, err error)
+    Set(ctx context.Context, key, value string) error
+    Delete(ctx context.Context, key string) error
+    ListStatus(ctx context.Context, recommendedEnvs []string, provider string) ([]EnvStatus, error)
+    LoadMergedEnvSlice(ctx context.Context) ([]string, error)
+    VaultPath() string
+}
+```
+
+### Seguridad y Permisos Estrictos
+
+El almacén reside en `.harness/vault.json` y se rige por las siguientes garantías:
+- **Permisos POSIX 0600:** Lectura y escritura exclusivas para el propietario del proceso.
+- **Ignorado por Git:** Se incluye automáticamente en `.gitignore` para prevenir filtraciones accidentales al repositorio remoto.
+- **Inyección Transparente:** Mediante `LoadMergedEnvSlice`, fusiona las variables de entorno del sistema operativo con las claves del Vault (teniendo precedencia el Vault) y las inyecta al proceso agéntico (`OSRunner`) mediante la interfaz `EnvSetter`.
+- **Enmascaramiento:** La función `MaskSecret` oculta el valor dejando visibles solo los últimos 4 caracteres.
+
+---
+
+## 11. `features/tooling.Service` (Toolkits Modulares y Presets)
+
+Ubicado en `internal/features/tooling/service.go`, `model.go` y `loader.go`.
+
+### Definición del Contrato
+
+```go
+type Service interface {
+    ListToolkits(ctx context.Context) ([]*Toolkit, error)
+    GetToolkit(ctx context.Context, id string) (*Toolkit, error)
+    CreateToolkit(ctx context.Context, req CreateToolkitRequest) (*Toolkit, error)
+    ListSkills(ctx context.Context) ([]SkillInfo, error)
+    ListPresets(ctx context.Context) ([]Preset, error)
+    GetPreset(ctx context.Context, name string) (*Preset, error)
+    GetProfile(ctx context.Context, name string) (*ProfileConfig, error)
+    ResolveToolkits(ctx context.Context, names []string) ([]string, error)
+    ComposeToolkits(ctx context.Context, toolkitIDs []string) (*ComposedTooling, error)
+    ProjectIntoWorktree(ctx context.Context, targetDir string, composed *ComposedTooling, sessionID string, baseDir string) error
+    RegisterToolsInKernel(ctx context.Context, kernel *orchy.Kernel, composed *ComposedTooling, workDir string) error
+    GlobalDir() string
+    ProjectDir() string
+}
+```
+
+### Arquitectura de Dos Niveles: Toolkits y Presets
+
+- **Toolkits (`Toolkit`):** Paquetes modulares autónomos (`.harness/toolkits/<id>` o `~/.config/gz-ia/tooling/toolkits/<id>`) con directivas `AGENTS.md`, `rules/`, `skills/`, `tools.json` y variables requeridas.
+- **Presets (`Preset`):** Colecciones convenientes declaradas en `~/.config/gz-ia/tooling/config.json` que agrupan uno o más toolkits bajo un identificador reutilizable (ej. `fullstack`).
+- **Proyección Dinámica:** `ProjectIntoWorktree` sintetiza un archivo `AGENTS.md` maestro, proyecta las reglas y crea enlaces simbólicos a las carpetas de skills en `.agents/skills/`.
+- **Registro en Microkernel:** `RegisterToolsInKernel` adapta las herramientas ejecutables declaradas en los toolkits mediante `ToolAdapter` y las registra en el microkernel Orchy bajo la protección de Circuit Breakers.
+

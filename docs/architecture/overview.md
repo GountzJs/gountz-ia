@@ -74,7 +74,7 @@ flowchart TB
 
 Esta capa maneja la interacción directa con el usuario, procesa argumentos y formatea las respuestas:
 
-- **`internal/clients/cli`:** Construida sobre `spf13/cobra`. Proporciona el árbol completo de comandos y subcomandos (`chat`, `session`, `vault`, `mcp`, `update`, `version`). No contiene lógica de negocio; valida parámetros e invoca a los servicios de dominio.
+- **`internal/clients/cli`:** Construida sobre `spf13/cobra`. Proporciona el árbol completo de comandos y subcomandos (`start`, `chat`, `session`, `toolkit`, `vault`, `mcp`, `update`, `version`). No contiene lógica de negocio; valida parámetros e invoca a los servicios de dominio.
 - **`internal/clients/tui`:** Construida con `charmbracelet/bubbletea`, `lipgloss` y `huh`. Proporciona la experiencia visual guiada con menús accesibles, banners de telemetría y diálogos interactivos de confirmación.
 
 ### 2. Capa de Servicios de Dominio (`internal/features/`)

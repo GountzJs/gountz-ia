@@ -13,6 +13,10 @@ const dragStart = ref({ x: 0, y: 0 })
 function setupMermaidContainers() {
   const containers = document.querySelectorAll<HTMLElement>('.mermaid')
   containers.forEach((container) => {
+    // Solo inicializar si el SVG ya fue renderizado en el DOM
+    const svg = container.querySelector<SVGElement>('svg')
+    if (!svg) return
+
     if (container.dataset.zoomEnabled) return
     container.dataset.zoomEnabled = 'true'
 
@@ -27,11 +31,8 @@ function setupMermaidContainers() {
     let startX = 0
     let startY = 0
 
-    const svg = container.querySelector<SVGElement>('svg')
-    if (svg) {
-      svg.style.transformOrigin = 'center center'
-      svg.style.transition = 'transform 0.15s ease-out'
-    }
+    svg.style.transformOrigin = 'center center'
+    svg.style.transition = 'transform 0.15s ease-out'
 
     const updateTransform = () => {
       const currentSvg = container.querySelector<SVGElement>('svg')
@@ -40,79 +41,85 @@ function setupMermaidContainers() {
       }
     }
 
-    // Crear barra de herramientas flotante
-    const toolbar = document.createElement('div')
-    toolbar.className = 'mermaid-toolbar'
-    toolbar.innerHTML = `
-      <button class="zoom-btn zoom-in" title="Acercar (Zoom In)">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
-      </button>
-      <button class="zoom-btn zoom-out" title="Alejar (Zoom Out)">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
-      </button>
-      <button class="zoom-btn zoom-reset" title="Restablecer">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
-      </button>
-      <button class="zoom-btn zoom-fullscreen" title="Pantalla completa">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
-      </button>
-    `
+    // Crear barra de herramientas flotante si no existe
+    if (!container.querySelector('.mermaid-toolbar')) {
+      const toolbar = document.createElement('div')
+      toolbar.className = 'mermaid-toolbar'
+      toolbar.innerHTML = `
+        <button class="zoom-btn zoom-in" title="Acercar (Zoom In)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+        </button>
+        <button class="zoom-btn zoom-out" title="Alejar (Zoom Out)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+        </button>
+        <button class="zoom-btn zoom-reset" title="Restablecer">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+        </button>
+        <button class="zoom-btn zoom-fullscreen" title="Pantalla completa">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+        </button>
+      `
 
-    // Eventos de botones
-    toolbar.querySelector('.zoom-in')?.addEventListener('click', (e) => {
-      e.stopPropagation()
-      scale = Math.min(scale + 0.25, 3.5)
-      updateTransform()
-    })
+      toolbar.querySelector('.zoom-in')?.addEventListener('click', (e) => {
+        e.stopPropagation()
+        scale = Math.min(scale + 0.25, 3.5)
+        updateTransform()
+      })
 
-    toolbar.querySelector('.zoom-out')?.addEventListener('click', (e) => {
-      e.stopPropagation()
-      scale = Math.max(scale - 0.25, 0.5)
-      updateTransform()
-    })
+      toolbar.querySelector('.zoom-out')?.addEventListener('click', (e) => {
+        e.stopPropagation()
+        scale = Math.max(scale - 0.25, 0.5)
+        updateTransform()
+      })
 
-    toolbar.querySelector('.zoom-reset')?.addEventListener('click', (e) => {
-      e.stopPropagation()
-      scale = 1
-      translateX = 0
-      translateY = 0
-      updateTransform()
-    })
+      toolbar.querySelector('.zoom-reset')?.addEventListener('click', (e) => {
+        e.stopPropagation()
+        scale = 1
+        translateX = 0
+        translateY = 0
+        updateTransform()
+      })
 
-    toolbar.querySelector('.zoom-fullscreen')?.addEventListener('click', (e) => {
-      e.stopPropagation()
-      const currentSvg = container.querySelector<SVGElement>('svg')
-      if (currentSvg) {
-        modalSvgHtml.value = currentSvg.outerHTML
-        modalScale.value = 1.2
-        modalTranslate.value = { x: 0, y: 0 }
-      }
-    })
+      toolbar.querySelector('.zoom-fullscreen')?.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const currentSvg = container.querySelector<SVGElement>('svg')
+        if (currentSvg) {
+          modalSvgHtml.value = currentSvg.outerHTML
+          modalScale.value = 1.2
+          modalTranslate.value = { x: 0, y: 0 }
+        }
+      })
 
-    container.appendChild(toolbar)
+      container.appendChild(toolbar)
+    }
 
     // Arrastre con el mouse para paneo
-    container.addEventListener('mousedown', (e) => {
+    const onMouseDown = (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest('.mermaid-toolbar')) return
       isDragging = true
       startX = e.clientX - translateX
       startY = e.clientY - translateY
       container.style.cursor = 'grabbing'
-    })
 
-    window.addEventListener('mousemove', (e) => {
-      if (!isDragging) return
-      translateX = e.clientX - startX
-      translateY = e.clientY - startY
-      updateTransform()
-    })
+      const onMouseMove = (moveEvt: MouseEvent) => {
+        if (!isDragging) return
+        translateX = moveEvt.clientX - startX
+        translateY = moveEvt.clientY - startY
+        updateTransform()
+      }
 
-    window.addEventListener('mouseup', () => {
-      if (isDragging) {
+      const onMouseUp = () => {
         isDragging = false
         container.style.cursor = 'grab'
+        window.removeEventListener('mousemove', onMouseMove)
+        window.removeEventListener('mouseup', onMouseUp)
       }
-    })
+
+      window.addEventListener('mousemove', onMouseMove)
+      window.addEventListener('mouseup', onMouseUp)
+    }
+
+    container.addEventListener('mousedown', onMouseDown)
 
     // Zoom con rueda de ratón (Ctrl + Scroll o Shift + Scroll)
     container.addEventListener('wheel', (e) => {

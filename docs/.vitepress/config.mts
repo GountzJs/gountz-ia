@@ -20,7 +20,7 @@ export default withMermaid(
       { text: 'Microkernel Orchy', link: '/orchy/microkernel', activeMatch: '/orchy/' },
       { text: 'Referencia CLI & API', link: '/reference/cli', activeMatch: '/reference/' },
       {
-        text: 'v0.0.1',
+        text: 'v0.0.3',
         items: [
           { text: 'Changelog', link: '/reference/changelog' },
           { text: 'Repositorio', link: 'https://github.com/GountzJs/gountz-ia' }
@@ -76,7 +76,7 @@ export default withMermaid(
             { text: 'Protocolo de Logger', link: '/reference/logger' },
             { text: 'Esquemas de MCP Tools', link: '/reference/mcp-tools' },
             { text: 'Variables de Entorno y Configuración', link: '/reference/env' },
-            { text: 'Changelog v0.0.1', link: '/reference/changelog' }
+            { text: 'Changelog (Historial)', link: '/reference/changelog' }
           ]
         }
       ]

@@ -32,7 +32,7 @@ func main() {
 
 ---
 
-## Herramienta: `worktree_read`
+## <span id="worktree-read"></span>Herramienta: `worktree_read`
 
 Permite a los agentes de IA (o subagentes revisores de código) examinar de forma no invasiva las modificaciones realizadas dentro del worktree de una sesión.
 
@@ -67,7 +67,7 @@ Permite a los agentes de IA (o subagentes revisores de código) examinar de form
 
 ---
 
-## Herramienta: `worktree_get`
+## <span id="worktree-get"></span>Herramienta: `worktree_get`
 
 Permite integrar las modificaciones validadas del worktree hacia la rama de trabajo activa.
 

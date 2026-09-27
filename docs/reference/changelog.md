@@ -6,6 +6,31 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.0.3] - 2026-09-27
+
+### Tercera Entrega — Toolkits Modulares, Presets Emergentes y Refactor de Tooling
+
+Esta versión consolida el modelo composable donde el **Toolkit** es la unidad atómica de capacidad y el **Perfil / Preset** es una composición emergente, eliminando el antiguo paquete monolítico `profile` y potenciando la experiencia interactiva tanto en CLI como en TUI.
+
+#### ✨ Novedades y Mejoras
+
+- **Transición a Toolkits Modulares y Presets Emergentes (`tooling`):**
+  - Reemplazo completo del modelo estático monolítico de `profile` por la arquitectura desacoplada de `tooling`: el **Toolkit** como unidad atómica y el **Preset** como composición emergente.
+  - Eliminación definitiva del paquete `internal/features/profile/` (`composer.go`, `model.go`, `profile_test.go`, `projector.go`, `service.go`, `store.go`) y el archivo CLI `internal/clients/cli/profile.go`.
+  - Nuevo comando CLI `gz-ia toolkit` con subcomandos `list`, `show`, `create` (alias `init`), `skills` y `path`, manteniendo `profile`, `profiles` y `toolkits` como aliases de retrocompatibilidad.
+  - Scaffolding estándar para toolkits con `toolkit.json`, directivas maestras (`AGENTS.md`), reglas (`rules/example.md`), habilidades (`skills/example/SKILL.md`) y herramientas ejecutables (`tools.json`).
+  - Síntesis dinámica en caliente de `AGENTS.md` y proyección no destructiva de enlaces simbólicos para habilidades y reglas en worktrees.
+- **Evolución del CLI (`gz-ia chat` y `gz-ia mcp`):**
+  - Nueva bandera `-T, --toolkit <id>` en `gz-ia chat` para activar toolkits modulares específicos (repetible o separado por comas).
+  - Bandera `-P` ahora representa `--preset`, manteniendo `--profile` como alias de compatibilidad.
+  - Registro dinámico en el microkernel Orchy de herramientas declaradas en `tools.json` o scripts en `tools/` protegidas por Circuit Breaker.
+- **Mejoras Integrales en la TUI (`internal/clients/tui`):**
+  - Selector interactivo de toolkits y presets en el menú de chat.
+  - Exploración y configuración interactiva del Vault de secretos.
+  - Visualización y manejo reactivo mejorado para terminales con Fastfetch.
+
+---
+
 ## [0.0.2] - 2026-09-26
 
 ### Segunda Entrega — Vault de Secretos, Manifiesto de Worktrees y Tooling Modular

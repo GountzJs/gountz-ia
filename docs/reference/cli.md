@@ -39,7 +39,7 @@ Guía detallada de sintaxis, argumentos, banderas y códigos de retorno de todos
 
 ## Detalle de Comandos
 
-### `gz-ia` / `gz-ia start`
+### <span id="gz-ia-start"></span>`gz-ia` / `gz-ia start`
 
 Inicia la interfaz de usuario de terminal (TUI interactiva).
 
@@ -165,7 +165,7 @@ Envía `SIGTERM` y escala a `SIGKILL` si no finaliza dentro del tiempo de espera
 
 ---
 
-### `gz-ia session resume` *(alias: `continue`)*
+### <span id="gz-ia-session-resume"></span>`gz-ia session resume` *(alias: `continue`)*
 
 Reanuda una sesión existente, reingresando a su worktree y reconectando la terminal interactiva con la bandera de reanudación adecuada del agente (`--continue` o `--resume`).
 
@@ -176,7 +176,7 @@ gz-ia session continue <session-id>
 
 ---
 
-### `gz-ia session delete` *(alias: `rm`)*
+### <span id="gz-ia-session-delete"></span>`gz-ia session delete` *(alias: `rm`)*
 
 Elimina el registro de la sesión y destruye el Git Worktree efímero y la rama de Git correspondiente.
 
@@ -217,7 +217,7 @@ gz-ia session read <session-id> [--stat]
 
 ---
 
-### `gz-ia session get` *(alias: `merge`)*
+### <span id="gz-ia-session-get"></span><span id="gz-ia-session-merge"></span>`gz-ia session get` *(alias: `merge`)*
 
 Fusiona e integra los cambios del worktree hacia la rama de trabajo activa.
 
