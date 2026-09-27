@@ -2199,6 +2199,7 @@ func TestSessionCmd_Prune(t *testing.T) {
 
 func TestToolkitCmd_Lifecycle(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Setenv("GZ_TOOLING_DIR", filepath.Join(tmpDir, "empty-global-tooling"))
 
 	// 1. Toolkit list vacio
 	cmd := NewRootCmd()

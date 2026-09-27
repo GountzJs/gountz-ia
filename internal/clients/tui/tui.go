@@ -329,110 +329,209 @@ func (c *Client) handleNewChat(icons IconSet) error {
 	toolingSvc := c.getToolingService(cwd)
 
 	var selectedToolings []string
-	var toolkitOptions []huh.Option[string]
 
-	// 1. Opciones de Presets
-	if presets, err := toolingSvc.ListPresets(context.Background()); err == nil {
+	presets, _ := toolingSvc.ListPresets(context.Background())
+	if len(presets) > 0 {
+		var selectedChoice string = "__none__"
+		var choiceOptions []huh.Option[string]
+
 		for _, p := range presets {
 			desc := p.Description
 			if desc != "" {
 				desc = " — " + desc
 			}
-			label := fmt.Sprintf("[Preset] %s%s (%d toolkits)", p.Name, desc, len(p.Toolkits))
-			toolkitOptions = append(toolkitOptions, huh.NewOption(label, p.Name))
+			label := fmt.Sprintf("%s%s (%d toolkits)", p.Name, desc, len(p.Toolkits))
+			choiceOptions = append(choiceOptions, huh.NewOption(label, p.Name))
 		}
-	}
 
-	// 2. Opciones de Toolkits
-	if toolkits, err := toolingSvc.ListToolkits(context.Background()); err == nil {
-		for _, tk := range toolkits {
-			desc := tk.Description
-			if desc != "" {
-				desc = " — " + desc
-			}
-			label := fmt.Sprintf("[Toolkit] %s (%s, %d skills)%s", tk.ID, tk.Scope, len(tk.SkillPaths), desc)
-			toolkitOptions = append(toolkitOptions, huh.NewOption(label, tk.ID))
-		}
-	}
-
-	// 3. Acción interactiva para scaffolding de nuevo toolkit
-	toolkitOptions = append(toolkitOptions, huh.NewOption(
-		fmt.Sprintf("%s [+] Inicializar nuevo toolkit (Scaffold)...", icons.Sparkle),
-		"__scaffold__",
-	))
-
-	toolkitForm := huh.NewForm(
-		huh.NewGroup(
-			huh.NewMultiSelect[string]().
-				Title(fmt.Sprintf("%s Toolkits y Presets Agénticos a activar (Opcional):", icons.Box)).
-				Description("Espacio para seleccionar/deseleccionar. Enter para continuar.").
-				Options(toolkitOptions...).
-				Value(&selectedToolings),
-		),
-	).WithTheme(CustomHuhTheme())
-	toolkitForm = c.prepareForm(toolkitForm)
-
-	if err := toolkitForm.Run(); err != nil {
-		return nil
-	}
-
-	// Si se seleccionó la opción de scaffolding, ejecutar el formulario interactivo Huh
-	hasScaffold := false
-	var finalToolings []string
-	for _, item := range selectedToolings {
-		if item == "__scaffold__" {
-			hasScaffold = true
-		} else {
-			finalToolings = append(finalToolings, item)
-		}
-	}
-
-	if hasScaffold {
-		var (
-			newTKID   string
-			newTKDesc string
-			newTKGlob bool
+		choiceOptions = append(choiceOptions,
+			huh.NewOption(fmt.Sprintf("%s  Sin perfil (sesión base sin toolkits adicionales)", icons.Shield), "__none__"),
+			huh.NewOption(fmt.Sprintf("%s  Personalizado (seleccionar toolkits individuales...)", icons.Box), "__custom__"),
+			huh.NewOption(fmt.Sprintf("%s  Inicializar nuevo toolkit (Scaffold)...", icons.Sparkle), "__scaffold__"),
 		)
-		scaffoldForm := huh.NewForm(
+
+		profileForm := huh.NewForm(
 			huh.NewGroup(
-				huh.NewInput().
-					Title("Identificador del nuevo toolkit:").
-					Description("Nombre único en kebab-case (ej. backend-go, devops-aws)").
-					Value(&newTKID).
-					Validate(func(s string) error {
-						if strings.TrimSpace(s) == "" {
-							return fmt.Errorf("el ID no puede estar vacío")
-						}
-						return nil
-					}),
-				huh.NewInput().
-					Title("Descripción del toolkit:").
-					Description("Propósito o directivas principales").
-					Value(&newTKDesc),
-				huh.NewConfirm().
-					Title("¿Crear en ámbito global (~/.config/gz-ia/tooling) en lugar del proyecto (.harness)?").
-					Value(&newTKGlob),
+				huh.NewSelect[string]().
+					Title(fmt.Sprintf("%s Selecciona el perfil agéntico para la sesión:", icons.Box)).
+					Description("Carga automáticamente los toolkits y directivas correspondientes").
+					Options(choiceOptions...).
+					Value(&selectedChoice),
 			),
 		).WithTheme(CustomHuhTheme())
-		scaffoldForm = c.prepareForm(scaffoldForm)
+		profileForm = c.prepareForm(profileForm)
 
-		if err := scaffoldForm.Run(); err == nil && strings.TrimSpace(newTKID) != "" {
-			cleanID := strings.TrimSpace(newTKID)
-			created, err := toolingSvc.CreateToolkit(context.Background(), tooling.CreateToolkitRequest{
-				ID:          cleanID,
-				Description: newTKDesc,
-				Global:      newTKGlob,
-			})
-			if err == nil && created != nil {
-				fmt.Fprintf(c.getOut(), "%s Toolkit '%s' creado exitosamente y seleccionado para la sesión.\n", icons.Check, cleanID)
-				finalToolings = append(finalToolings, cleanID)
-			} else {
-				fmt.Fprintf(c.getOut(), "%s Error creando toolkit: %v\n", icons.Cross, err)
+		if err := profileForm.Run(); err != nil {
+			return nil
+		}
+
+		switch selectedChoice {
+		case "__none__":
+			selectedToolings = nil
+		case "__custom__":
+			var customToolings []string
+			var customOptions []huh.Option[string]
+			if toolkits, err := toolingSvc.ListToolkits(context.Background()); err == nil {
+				for _, tk := range toolkits {
+					desc := tk.Description
+					if desc != "" {
+						desc = " — " + desc
+					}
+					label := fmt.Sprintf("%s (%s, %d skills)%s", tk.ID, tk.Scope, len(tk.SkillPaths), desc)
+					customOptions = append(customOptions, huh.NewOption(label, tk.ID))
+				}
+			}
+			if len(customOptions) > 0 {
+				customForm := huh.NewForm(
+					huh.NewGroup(
+						huh.NewMultiSelect[string]().
+							Title(fmt.Sprintf("%s Selecciona los toolkits individuales a activar:", icons.Box)).
+							Description("Espacio para seleccionar/deseleccionar. Enter para continuar.").
+							Options(customOptions...).
+							Value(&customToolings),
+					),
+				).WithTheme(CustomHuhTheme())
+				customForm = c.prepareForm(customForm)
+				if err := customForm.Run(); err == nil {
+					selectedToolings = customToolings
+				}
+			}
+		case "__scaffold__":
+			var (
+				newTKID   string
+				newTKDesc string
+				newTKGlob bool
+			)
+			scaffoldForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewInput().
+						Title("Identificador del nuevo toolkit:").
+						Description("Nombre único en kebab-case (ej. backend-go, devops-aws)").
+						Value(&newTKID).
+						Validate(func(s string) error {
+							if strings.TrimSpace(s) == "" {
+								return fmt.Errorf("el ID no puede estar vacío")
+							}
+							return nil
+						}),
+					huh.NewInput().
+						Title("Descripción del toolkit:").
+						Description("Propósito o directivas principales").
+						Value(&newTKDesc),
+					huh.NewConfirm().
+						Title("¿Crear en ámbito global (~/.config/gz-ia/tooling) en lugar del proyecto (.harness)?").
+						Value(&newTKGlob),
+				),
+			).WithTheme(CustomHuhTheme())
+			scaffoldForm = c.prepareForm(scaffoldForm)
+
+			if err := scaffoldForm.Run(); err == nil && strings.TrimSpace(newTKID) != "" {
+				cleanID := strings.TrimSpace(newTKID)
+				created, err := toolingSvc.CreateToolkit(context.Background(), tooling.CreateToolkitRequest{
+					ID:          cleanID,
+					Description: newTKDesc,
+					Global:      newTKGlob,
+				})
+				if err == nil && created != nil {
+					fmt.Fprintf(c.getOut(), "%s Toolkit '%s' creado exitosamente y seleccionado para la sesión.\n", icons.Check, cleanID)
+					selectedToolings = append(selectedToolings, cleanID)
+				} else {
+					fmt.Fprintf(c.getOut(), "%s Error creando toolkit: %v\n", icons.Cross, err)
+				}
+			}
+		default:
+			selectedToolings = []string{selectedChoice}
+		}
+	} else {
+		var toolkitOptions []huh.Option[string]
+		if toolkits, err := toolingSvc.ListToolkits(context.Background()); err == nil {
+			for _, tk := range toolkits {
+				desc := tk.Description
+				if desc != "" {
+					desc = " — " + desc
+				}
+				label := fmt.Sprintf("%s (%s, %d skills)%s", tk.ID, tk.Scope, len(tk.SkillPaths), desc)
+				toolkitOptions = append(toolkitOptions, huh.NewOption(label, tk.ID))
 			}
 		}
-	}
 
-	selectedToolings = finalToolings
+		toolkitOptions = append(toolkitOptions, huh.NewOption(
+			fmt.Sprintf("%s [+] Inicializar nuevo toolkit (Scaffold)...", icons.Sparkle),
+			"__scaffold__",
+		))
+
+		toolkitForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewMultiSelect[string]().
+					Title(fmt.Sprintf("%s Toolkits a activar (Opcional):", icons.Box)).
+					Description("Espacio para seleccionar/deseleccionar. Enter para continuar.").
+					Options(toolkitOptions...).
+					Value(&selectedToolings),
+			),
+		).WithTheme(CustomHuhTheme())
+		toolkitForm = c.prepareForm(toolkitForm)
+
+		if err := toolkitForm.Run(); err != nil {
+			return nil
+		}
+
+		var finalToolings []string
+		hasScaffold := false
+		for _, item := range selectedToolings {
+			if item == "__scaffold__" {
+				hasScaffold = true
+			} else {
+				finalToolings = append(finalToolings, item)
+			}
+		}
+
+		if hasScaffold {
+			var (
+				newTKID   string
+				newTKDesc string
+				newTKGlob bool
+			)
+			scaffoldForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewInput().
+						Title("Identificador del nuevo toolkit:").
+						Description("Nombre único en kebab-case (ej. backend-go, devops-aws)").
+						Value(&newTKID).
+						Validate(func(s string) error {
+							if strings.TrimSpace(s) == "" {
+								return fmt.Errorf("el ID no puede estar vacío")
+							}
+							return nil
+						}),
+					huh.NewInput().
+						Title("Descripción del toolkit:").
+						Description("Propósito o directivas principales").
+						Value(&newTKDesc),
+					huh.NewConfirm().
+						Title("¿Crear en ámbito global (~/.config/gz-ia/tooling) en lugar del proyecto (.harness)?").
+						Value(&newTKGlob),
+				),
+			).WithTheme(CustomHuhTheme())
+			scaffoldForm = c.prepareForm(scaffoldForm)
+
+			if err := scaffoldForm.Run(); err == nil && strings.TrimSpace(newTKID) != "" {
+				cleanID := strings.TrimSpace(newTKID)
+				created, err := toolingSvc.CreateToolkit(context.Background(), tooling.CreateToolkitRequest{
+					ID:          cleanID,
+					Description: newTKDesc,
+					Global:      newTKGlob,
+				})
+				if err == nil && created != nil {
+					fmt.Fprintf(c.getOut(), "%s Toolkit '%s' creado exitosamente y seleccionado para la sesión.\n", icons.Check, cleanID)
+					finalToolings = append(finalToolings, cleanID)
+				} else {
+					fmt.Fprintf(c.getOut(), "%s Error creando toolkit: %v\n", icons.Cross, err)
+				}
+			}
+		}
+
+		selectedToolings = finalToolings
+	}
 
 	req := session.StartChatRequest{
 		Provider:        selectedDriver.ID(),
