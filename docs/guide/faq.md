@@ -156,9 +156,9 @@ Consulta la [Guía de Limpieza y Desinstalación](/guide/clean-uninstall) para m
 
 Si mientras el agente trabajaba en su worktree aislado creaste nuevos commits en tu rama base:
 
-1. Al ejecutar `gz-ia session get <id>` (o `gz-ia session merge <id>`), `gz-ia` realiza un `git merge` estándar de la rama `harness/<id>` sobre tu rama activa.
-2. **Si no hay conflictos en las mismas líneas:** Git realiza una fusión limpia automática.
-3. **Si existen conflictos:** Git detiene el proceso de fusión informando los archivos en colisión. `gz-ia` no sobreescribe ni destruye tu trabajo. El worktree de la sesión permanece intacto para que puedas resolver los conflictos manualmente con tus herramientas habituales o abortar con `git merge --abort`.
+1. Al ejecutar `gz-ia session get <id>`, `gz-ia` trae los archivos creados y modificados por la sesión directamente a tu directorio de trabajo activo como modificaciones no preparadas (*unstaged*).
+2. **Cero merge commits o conflictos:** No se realiza `git merge` ni se generan commits automáticos, permitiéndote revisar las diferencias con `git diff` antes de realizar el commit en tu rama base.
+3. **Continuidad y Contexto:** Puedes consultar `gz-ia session context <id>` para revisar el historial completo de eventos y archivos mutados antes de integrar.
 
 ---
 

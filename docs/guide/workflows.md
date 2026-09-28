@@ -12,8 +12,8 @@ En proyectos en producción, permitir que un agente de IA modifique directamente
 flowchart LR
     A["Workspace Activo"] -->|"1. gz-ia chat"| B["Git Worktree Aislado"]
     B -->|"2. Refactorización en Segundo Plano"| B
-    A -->|"3. gz-ia session read --stat"| B
-    B -->|"4. gz-ia session get --no-commit"| A
+    A -->|"3. gz-ia session context / read"| B
+    B -->|"4. gz-ia session get"| A
 ```
 
 ### Paso 1: Lanzar la sesión de refactorización
@@ -28,9 +28,12 @@ El harness asigna automáticamente un ID de sesión (ejemplo: `a8f102c4`) y mont
 
 ### Paso 2: Auditar el avance sin tocar el código base
 
-Mientras el agente trabaja, puedes abrir otra pestaña de terminal y verificar qué archivos ha modificado o creado:
+Mientras el agente trabaja, puedes abrir otra pestaña de terminal y verificar qué archivos ha modificado o creado, o consultar el contexto completo para transferencias de trabajo entre agentes:
 
 ```bash
+# Inspección del contexto unificado de sesión (metadatos, eventos y archivos)
+gz-ia session context a8f102c4
+
 # Inspección no invasiva del resumen estadístico
 gz-ia session read a8f102c4 --stat
 ```
@@ -52,10 +55,10 @@ gz-ia session diff a8f102c4
 
 ### Paso 3: Traer e integrar cambios al workspace activo
 
-Una vez confirmada la calidad del trabajo del agente, traemos los cambios al workspace principal en modo *staging* para dar el visto bueno final:
+Una vez confirmada la calidad del trabajo del agente, traemos los cambios al workspace principal como modificaciones no preparadas (*unstaged*) sin git merge commits automáticos:
 
 ```bash
-gz-ia session get a8f102c4 --no-commit
+gz-ia session get a8f102c4
 ```
 
 **Salida en consola:**
@@ -66,7 +69,7 @@ Archivos integrados:
   • internal/repository/user_repo.go
   • internal/repository/order_repo.go
   • internal/service/order_service.go
-Nota: Los cambios quedaron preparados en el stage sin comitear (--no-commit).
+Nota: Los cambios quedaron traídos al directorio activo como modificaciones unstaged sin git merge commits.
 ```
 
 Ahora puedes ejecutar tu suite de pruebas local (`go test ./...`) y realizar el commit definitivo con la autoría y mensaje que prefieras.
@@ -167,7 +170,7 @@ echo "==> Ejecutando suite de validación en el entorno aislado..."
 if go test -race ./... && golangci-lint run; then
     echo "✓ Todas las pruebas pasaron satisfactoriamente en el worktree."
     echo "==> Fusionando cambios al workspace activo..."
-    gz-ia session get "${SESSION_ID}" --squash
+    gz-ia session get "${SESSION_ID}"
 else
     echo "✗ Las pruebas fallaron en el worktree. No se integrarán los cambios."
     exit 1

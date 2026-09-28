@@ -6,11 +6,48 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.4.0] - 2026-09-28
+
+### Memoria Semántica, Contexto Centralizado y Soberanía Estricta de Git
+
+Esta versión introduce la infraestructura de memoria de contexto y decisiones (`internal/features/memory`), la consolidación de eventos como fuente centralizada de estado de sesión (`SessionContext`) y la soberanía estricta de Git en la integración de cambios.
+
+#### Novedades y Mejoras
+
+- **Memoria de Contexto y Decisiones (`internal/features/memory`):**
+  - Almacenamiento dual semántico: memoria local por sesión (`.harness/sessions/<id>.memory.json`) y global del proyecto (`.harness/memory.json`).
+  - Motor de búsqueda semántica con ranking Okapi BM25 (`BM25Search`) tokenizado con ponderación por título, etiquetas y contenido.
+  - Batería de herramientas MCP nativas (`memory_save`, `memory_search`, `memory_list`, `memory_consolidate`).
+  - Subcomandos CLI `gz-ia memory` (`save`, `search`, `list`, `consolidate`).
+- **Events como Fuente Centralizada de Estado (`internal/features/session`):**
+  - Metadata enriquecida en eventos de observabilidad `START` y `FINISH`.
+  - Estructura `SessionContext` para handoff continuo entre agentes con el historial completo de eventos y diff de archivos.
+  - Subcomando CLI `gz-ia session context <id>` con soporte de salida formateada o JSON (`-j, --json`).
+- **Soberanía Estricta de Git en `gz-ia session get`:**
+  - Rediseño de `session.Service.Get`: trae las modificaciones y archivos creados desde el worktree de sesión directamente al directorio de trabajo activo como cambios no preparados (*unstaged*).
+  - Eliminación de banderas obsoletas `--squash` y `--no-commit`, evitando git merge commits intermediarios o conflictos en el historial de Git.
+
+---
+
 ## [0.3.0] - 2026-09-28
 
-### En desarrollo
+### Microkernel Orchy Modular, Observabilidad en Vivo y Auto-Updater
 
-> Pendiente de definición de alcance.
+Esta versión consolida el paquete modular `packages/orchy`, el soporte de observabilidad en vivo para eventos de sesión y el sistema de actualización atómica desde Forgejo y Sonatype Nexus.
+
+#### Novedades y Mejoras
+
+- **Reorganización del Microkernel Orchy (`packages/orchy/`):**
+  - Decoupling del microkernel en subsistemas independientes (`core`, `events`, `tools`, `plugins`, `batteries`, `mcp`).
+  - Honest Kernel con Circuit Breaker de 3 estados (`HEALTHY`, `DEGRADED`, `DEAD`) sobre proxies de herramientas (`ToolProxy`).
+  - Bus desacoplado de eventos Pub/Sub y RPC síncrono con control de context (`events.EventBus`).
+- **Observabilidad en Tiempo Real (`internal/features/logger`):**
+  - Streaming en vivo de eventos `.events.jsonl` mediante `gz-ia session logs <id> -f`.
+  - Batería de observabilidad MCP `ObservabilityPlugin` con la herramienta `session_log`.
+- **Actualizaciones Atómicas (`internal/features/updater`):**
+  - Verificación e instalación de releases binarias (`gz-ia update`) contra Forgejo y Sonatype Nexus, previniendo fallos `ETXTBSY`.
+- **Detección Untracked Recursiva (`internal/features/workspace`):**
+  - Cálculo de diffs incluyendo archivos no seguidos en subdirectorios profundos (`git status --porcelain`).
 
 ---
 

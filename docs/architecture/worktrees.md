@@ -124,26 +124,18 @@ gz-ia session read a8f1b2c3 --stat
 
 ### 2. Traer e Integrar Cambios: `session get`
 
-La integración es una **acción exclusivamente humana**. `gz-ia` no permite que el agente ejecute la integración hacia tu rama base.
+La integración es una **acción exclusivamente humana**. `gz-ia` no permite que el agente aplique cambios de forma autónoma hacia tu rama base.
 
 ```bash
-# Integrar los cambios directamente
+# Traer los cambios del worktree al workspace activo como modificaciones unstaged
 gz-ia session get a8f1b2c3
-
-# Integrar condensando commits en uno solo (squash)
-gz-ia session get a8f1b2c3 --squash
-
-# Integrar dejando los cambios en staging sin comitear automáticamente
-gz-ia session get a8f1b2c3 --no-commit
 ```
 
 #### Semántica Técnica de `session get`:
-1. **Validación de precondición en repositorio base:** Antes de iniciar la integración, `gz-ia` verifica que tu repositorio base no tenga modificaciones sin comitear. Si está sucio, frena la operación y te solicita realizar `commit` o `stash` para prevenir cualquier sobreescritura accidental.
-2. **Reconciliación y limpieza según el Manifiesto de Sesión:** Inspecciona `.harness/sessions/<id>.manifest.json`. Los archivos proyectados no modificados se retiran y los archivos legítimos preexistentes (`OriginalFiles`) se restauran a su estado original si no fueron tocados, preservando a su vez las ediciones intencionales realizadas por el agente.
-3. **Commit de seguridad previo en worktree (Conventional Commits):** Si en el worktree de la sesión existen modificaciones sin comitear o archivos untracked generados por el agente, `gz-ia` genera un commit de seguridad automático en la rama `harness/<id>` con el formato estándar `chore(harness): session <id> changes`.
-4. **Merge en la rama base activa:** Ejecuta un `git merge` (o `git merge --squash` si se pasa `--squash`, y sin commit si se pasa `--no-commit`) de la rama `harness/<id>` en la rama activa del repositorio. El commit resultante se nombra `chore(harness): merge session <id> changes` (o `chore(harness): merge session <id> changes (squash)`).
-5. **Reenvío de hooks:** Si el repositorio define hooks de validación (`pre-commit`, `commit-msg`), estos se ejecutan asegurando el cumplimiento estricto de las políticas de código del equipo.
-6. **Manejo de conflictos:** Si la rama base avanzó y existen conflictos, Git detiene la operación sin sobreescribir tus archivos; informa los archivos en conflicto y mantiene el worktree de la sesión intacto para resolución manual (`gz-ia session path <id>`) o para abortar (`git merge --abort` o `git reset --merge`).
+1. **Reconciliación y limpieza según el Manifiesto de Sesión:** Inspecciona `.harness/sessions/<id>.manifest.json`. Los archivos proyectados no modificados se retiran y los archivos legítimos preexistentes (`OriginalFiles`) se restauran a su estado original si no fueron tocados, preservando a su vez las ediciones intencionales realizadas por el agente.
+2. **Transferencia de modificaciones en modo Unstaged:** Copia las modificaciones de archivos y los archivos nuevos creados en la sesión directamente al directorio de trabajo activo como cambios no preparados (*unstaged*).
+3. **Soberanía Estricta de Git (Cero Merge Commits):** No realiza `git merge` ni crea commits automáticos en el repositorio principal, evitando mezclar ramas intermediarias o generar conflictos de merge en Git.
+4. **Inspección de Contexto Previor:** Se recomienda utilizar `gz-ia session context <id>` antes de integrar para revisar el historial completo de eventos de la sesión, los agentes participantes y la lista exacta de archivos mutados.
 
 ---
 

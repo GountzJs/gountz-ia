@@ -121,23 +121,25 @@ $ gz-ia session read 7e2a9b1c --stat
  2 files changed, 100 insertions(+)
 ```
 
-### 3. Visualizar las diferencias completas de código
+### 3. Visualizar las diferencias completas o el contexto de la sesión
 
 ```bash
 $ gz-ia session diff 7e2a9b1c
+# Muestra la información de contexto, historial de eventos y diff para handoff agéntico:
+$ gz-ia session context 7e2a9b1c
 ```
 
 ### 4. Integrar las modificaciones al workspace activo
 
-La integración de código es una acción exclusiva del desarrollador:
+La integración de código es una acción exclusiva del desarrollador. `gz-ia session get` trae los archivos modificados y creados como cambios no preparados (*unstaged*):
 
 ```bash
-$ gz-ia session get 7e2a9b1c --no-commit
+$ gz-ia session get 7e2a9b1c
 ✓ Cambios del worktree traídos e integrados con éxito para la sesión '7e2a9b1c'.
 Archivos integrados:
   • internal/validator/email.go
   • internal/validator/email_test.go
-Nota: Los cambios quedaron preparados en el stage sin comitear (--no-commit).
+Nota: Los cambios quedaron traídos al directorio activo como modificaciones unstaged sin git merge commits.
 ```
 
 ---

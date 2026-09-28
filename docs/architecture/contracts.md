@@ -16,6 +16,7 @@ flowchart TD
         VS["VaultService (Secretos y Variables de Entorno)"]
         TS["ToolingService (Toolkits Modulares y Presets)"]
         US["UpdaterService (Actualización Atómica)"]
+        MEM["MemoryService (Memoria Semántica BM25)"]
     end
 
     subgraph Adapters ["Adaptadores y Componentes"]
@@ -33,6 +34,7 @@ flowchart TD
     SS --> MS
     SS --> VS
     SS --> TS
+    SS --> MEM
     Runner --> Driver
 ```
 
@@ -50,7 +52,7 @@ type Service interface {
     List(ctx context.Context) ([]SessionRecord, error)
     GetRecord(ctx context.Context, id string) (*SessionRecord, error)
     GetSession(ctx context.Context, id string) (*SessionRecord, error)
-    Get(ctx context.Context, id string, opts MergeOptions) (*workspace.MergeResult, error)
+    Get(ctx context.Context, id string) (*workspace.MergeResult, error)
     Read(ctx context.Context, id string, statOnly bool) (string, error)
     Kill(ctx context.Context, id string) error
     Resume(ctx context.Context, id string) error
@@ -60,14 +62,16 @@ type Service interface {
     Merge(ctx context.Context, id string, opts MergeOptions) (*workspace.MergeResult, error)
     Metrics(ctx context.Context, id string) (*metrics.SessionMetrics, error)
     LogEvent(ctx context.Context, evt *logger.Event) error
+    Context(ctx context.Context, id string) (*SessionContext, error)
     GetEvents(ctx context.Context, id string) ([]logger.Event, error)
     WatchEvents(ctx context.Context, id string) (<-chan logger.Event, error)
+    Cleanup(ctx context.Context, id string) error
     Prune(ctx context.Context) (*PruneResult, error)
     Vault() vault.Service
 }
 ```
 
-### Estructuras de Petición y Opciones
+### Estructuras de Petición, Opciones y Contexto
 
 ```go
 type StartChatRequest struct {
@@ -84,6 +88,21 @@ type StartChatRequest struct {
 type MergeOptions struct {
     Squash   bool
     NoCommit bool
+}
+
+type SessionContext struct {
+    SessionID     string         `json:"session_id"`
+    Provider      string         `json:"provider"`
+    Branch        string         `json:"branch"`
+    Toolkits      []string       `json:"toolkits,omitempty"`
+    InitialPrompt string         `json:"initial_prompt,omitempty"`
+    WorkingDir    string         `json:"working_dir,omitempty"`
+    Status        string         `json:"status"`
+    StartedAt     time.Time      `json:"started_at"`
+    FinishedAt    *time.Time     `json:"finished_at,omitempty"`
+    DurationMs    int64          `json:"duration_ms,omitempty"`
+    Events        []logger.Event `json:"events,omitempty"`
+    FilesChanged  string         `json:"files_changed,omitempty"`
 }
 ```
 
@@ -530,4 +549,57 @@ type Service interface {
 - **Presets (`Preset`):** Colecciones convenientes declaradas en `~/.config/gz-ia/tooling/config.json` que agrupan uno o más toolkits bajo un identificador reutilizable (ej. `fullstack`).
 - **Proyección Dinámica:** `ProjectIntoWorktree` sintetiza un archivo `AGENTS.md` maestro, proyecta las reglas y crea enlaces simbólicos a las carpetas de skills en `.agents/skills/`.
 - **Registro en Microkernel:** `RegisterToolsInKernel` adapta las herramientas ejecutables declaradas en los toolkits mediante `ToolAdapter` y las registra en el microkernel Orchy bajo la protección de Circuit Breakers.
+
+---
+
+## 12. `features/memory.Service` (Memoria Semántica de Contexto y Decisiones)
+
+Ubicado en `internal/features/memory/service.go`, `model.go` y `store.go`.
+
+### Definición del Contrato
+
+```go
+type SearchOptions struct {
+    SessionID  string
+    GlobalOnly bool
+    Limit      int
+}
+
+type Service interface {
+    Save(ctx context.Context, rec Record) (*Record, error)
+    Search(ctx context.Context, query string, opts SearchOptions) ([]SearchResult, error)
+    List(ctx context.Context, opts SearchOptions) ([]Record, error)
+    Consolidate(ctx context.Context, sessionID string) ([]Record, error)
+}
+```
+
+### Estructuras de Datos y Modelo BM25
+
+```go
+type Record struct {
+    ID        string    `json:"id"`
+    SessionID string    `json:"session_id,omitempty"`
+    Title     string    `json:"title"`
+    Content   string    `json:"content"`
+    Category  string    `json:"category,omitempty"`
+    Tags      []string  `json:"tags,omitempty"`
+    CreatedAt time.Time `json:"created_at"`
+    UpdatedAt time.Time `json:"updated_at"`
+}
+
+type SearchResult struct {
+    Record Record  `json:"record"`
+    Score  float64 `json:"score"`
+}
+```
+
+### Arquitectura de Almacenamiento y Ranking Semántico
+
+1. **Almacenamiento Dual:**
+   - **Ámbito de Sesión:** Persistido en `.harness/sessions/<session_id>.memory.json`.
+   - **Ámbito Global del Proyecto:** Persistido en `.harness/memory.json`.
+2. **Ranking BM25 (`Okapi BM25`):**
+   - El método `BM25Search` tokeniza la consulta en minúsculas y calcula la relevancia de los documentos con ponderaciones por campo (Título $\times 2.0$, Etiquetas $\times 1.5$, Contenido $\times 1.0$, Categoría $\times 1.0$).
+3. **Consolidación de Memoria (`Consolidate`):**
+   - Combina atómicamente los registros de memoria locales de una sesión con el almacén global del proyecto, promoviendo decisiones de contexto para sesiones futuras.
 

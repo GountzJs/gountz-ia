@@ -24,12 +24,13 @@ Guía detallada de sintaxis, argumentos, banderas y códigos de retorno de todos
 | [`gz-ia session path`](#gz-ia-session-path) | `<id>`<br>`-d, --dir` | N/A | Imprime en `stdout` la ruta absoluta del espacio de trabajo. |
 | [`gz-ia session diff`](#gz-ia-session-diff) | `<id>`<br>`--stat`<br>`-d, --dir` | N/A | Muestra las diferencias de código producidas en la sesión. |
 | [`gz-ia session read`](#gz-ia-session-read) | `<id>`<br>`--stat`<br>`-d, --dir` | N/A | Inspecciona el contenido y diff actual del worktree sin mutar el base. |
-| [`gz-ia session merge`](#gz-ia-session-merge) | `<id>`<br>`--squash`<br>`--no-commit`<br>`-d, --dir` | N/A | Integra los cambios del worktree a la rama principal de trabajo. |
-| [`gz-ia session get`](#gz-ia-session-get) | `<id>`<br>`--squash`<br>`--no-commit`<br>`-d, --dir` | N/A | Trae e integra las modificaciones producidas en el worktree hacia el directorio activo. |
+| [`gz-ia session get`](#gz-ia-session-get) | `<id>`<br>`-d, --dir` | N/A | Trae las modificaciones del worktree hacia el directorio activo como unstaged sin git merge commits. |
+| [`gz-ia session context`](#gz-ia-session-context) | `<id>`<br>`-j, --json`<br>`-d, --dir` | N/A | Muestra el contexto y estado de trabajo de una sesión (handoff para agentes). |
 | [`gz-ia session metrics`](#gz-ia-session-metrics) | `<id>`<br>`--json`<br>`--detailed`<br>`-d, --dir` | N/A | Calcula duración, pasos, desglose de tokens y uso de herramientas. |
 | [`gz-ia session log`](#gz-ia-session-log) | `<id>`<br>`-a, --action`<br>`-s, --stage`<br>`--status`<br>`--agent`<br>`-r, --role`<br>`--duration`<br>`--error`<br>`-d, --dir` | N/A | Registra un evento estructurado en `.events.jsonl`. |
 | [`gz-ia session logs`](#gz-ia-session-logs) | `<id>`<br>`-f, --follow`<br>`--json`<br>`-d, --dir` | N/A | Consulta histórica o transmisión en vivo de los eventos de una sesión. |
 | [`gz-ia session prune`](#gz-ia-session-prune) | `-d, --dir` | N/A | Reconcilia y elimina sesiones, ramas de Git y worktrees huérfanos. |
+| [`gz-ia memory`](#gz-ia-memory) | `save`, `search`, `list`, `consolidate`<br>`-d, --dir` | N/A | Almacena y consulta memoria semántica local con ranking Okapi BM25. |
 | [`gz-ia vault`](#gz-ia-vault) | `list`, `set`, `get`, `delete`, `path`<br>`-d, --dir` | N/A | Gestiona secretos y variables de entorno centralizadas (`.harness/vault.json`). |
 | [`gz-ia mcp`](#gz-ia-mcp) | `--session`<br>`--tooling`<br>`--profile`<br>`--toolkit`<br>`--allow-get`<br>`-d, --dir` | N/A | Inicia el servidor MCP nativo de gz-ia sobre Stdio (JSON-RPC 2.0). |
 | [`gz-ia update`](#gz-ia-update) | `-c, --check`<br>`-f, --force`<br>`--version`<br>`--install-dir` | N/A | Verifica e instala la última versión de `gz-ia` desde GitHub Releases. |
@@ -217,22 +218,47 @@ gz-ia session read <session-id> [--stat]
 
 ---
 
-### <span id="gz-ia-session-get"></span><span id="gz-ia-session-merge"></span>`gz-ia session get` *(alias: `merge`)*
+### <span id="gz-ia-session-get"></span>`gz-ia session get` *(alias: `merge`)*
 
-Fusiona e integra los cambios del worktree hacia la rama de trabajo activa.
+Trae las modificaciones y archivos creados desde el worktree de sesión hacia el directorio de trabajo activo.
 
 ```bash
-gz-ia session get <session-id> [--squash] [--no-commit]
+gz-ia session get <session-id> [-d <directorio>]
 ```
 
-**Banderas:**
-- `--squash`: Condensa todos los commits intermedios de la sesión en un solo commit.
-- `--no-commit`: Fusiona los archivos y los deja en el *staging area* de Git sin crear commit automático.
-
 **Semántica técnica de integración:**
-1. Si hay cambios pendientes en el worktree de la sesión, genera un commit de seguridad en la rama `harness/<id>`.
-2. Ejecuta un `git merge` (o `git merge --squash` con `--squash`, y sin commit si se pasa `--no-commit`) de la rama `harness/<id>` en la rama activa del repositorio.
-3. Si la rama base avanzó y existen conflictos, Git se detiene sin sobreescribir tus archivos; informa los archivos en conflicto y mantiene el worktree intacto para resolución manual (`gz-ia session path <id>`) o abortar (`git merge --abort`).
+1. Trae todos los cambios y archivos nuevos producidos en la sesión directamente al directorio de trabajo activo como modificaciones no preparadas (*unstaged*).
+2. No realiza `git merge` ni crea commits automáticos en el repositorio principal, preservando la soberanía absoluta de Git y evitando estados intermediarios o conflictos de merge.
+3. Si no existen cambios pendientes en la sesión, informa que el directorio ya se encuentra actualizado.
+
+---
+
+### <span id="gz-ia-session-context"></span>`gz-ia session context`
+
+Muestra el contexto unificado y el estado de trabajo de una sesión, diseñado para handoff y continuidad entre agentes.
+
+```bash
+gz-ia session context <session-id> [flags]
+```
+
+**Banderas (Flags):**
+- `-j, --json`: Emite la estructura completa de contexto en formato JSON a `stdout`.
+- `-d, --dir <ruta>`: Directorio del proyecto.
+
+**Contenido del contexto:**
+- Metadatos de la sesión: ID, proveedor, rama, toolkits, prompt inicial y estado.
+- Métricas temporales: fecha de inicio, finalización y duración en milisegundos.
+- Historial de eventos de observabilidad (`.events.jsonl`): acciones, etapas (`READ`, `PENDING`, `FINISH`), duraciones y estados.
+- Diff de archivos modificados y creados durante la sesión.
+
+**Ejemplos:**
+```bash
+# Inspección visual del contexto de sesión
+gz-ia session context 3f9a12c8
+
+# Exportación de contexto en formato JSON para consumo de otro agente
+gz-ia session context 3f9a12c8 --json
+```
 
 ---
 
@@ -279,6 +305,60 @@ Reconcilia y elimina sesiones, ramas de Git y worktrees huérfanos que hayan que
 
 ```bash
 gz-ia session prune [-d, --dir <directorio>]
+```
+
+---
+
+### <span id="gz-ia-memory"></span>`gz-ia memory`
+
+Gestiona memoria semántica local y contexto de decisiones (arquitectura, reglas de negocio, hallazgos) con ranking semántico Okapi BM25.
+
+#### `gz-ia memory save`
+Guarda un registro de memoria o regla de conocimiento.
+
+```bash
+gz-ia memory save -t <título> -c <contenido> [flags]
+```
+
+**Banderas:**
+- `-t, --title <texto>`: Título descriptivo de la memoria (obligatorio).
+- `-c, --content <texto>`: Contenido detallado, código o especificación (obligatorio).
+- `--category <categoría>`: Categoría opcional (`decision`, `rule`, `architecture`, `bugfix`).
+- `--tags <etiquetas>`: Etiquetas separadas por coma para filtrado.
+- `--session <id>`: ID de sesión para guardar en la memoria local de sesión (`.harness/sessions/<id>.memory.json`). Si se omite, se guarda en la memoria global del proyecto (`.harness/memory.json`).
+- `-d, --dir <ruta>`: Directorio del proyecto.
+
+#### `gz-ia memory search <query>`
+Busca memorias relevantes ordenadas por el algoritmo de ranking Okapi BM25 combinando los almacenes de sesión y proyecto.
+
+```bash
+gz-ia memory search <consulta> [flags]
+```
+
+**Banderas:**
+- `--session <id>`: ID de sesión para incluir su memoria local en la búsqueda.
+- `--global-only`: Busca exclusivamente en la memoria del proyecto.
+- `-l, --limit <n>`: Límite de resultados (predeterminado: 10).
+- `-d, --dir <ruta>`: Directorio del proyecto.
+
+#### `gz-ia memory list`
+Lista los registros de memoria guardados.
+
+```bash
+gz-ia memory list [flags]
+```
+
+**Banderas:**
+- `--session <id>`: ID de sesión para incluir memorias locales.
+- `--global-only`: Lista exclusivamente memorias globales del proyecto.
+- `-j, --json`: Emite el catálogo completo de registros en formato JSON.
+- `-d, --dir <ruta>`: Directorio del proyecto.
+
+#### `gz-ia memory consolidate <session_id>`
+Promueve las entradas de memoria de una sesión específica hacia el almacén global del proyecto (`.harness/memory.json`).
+
+```bash
+gz-ia memory consolidate <session_id> [-d <ruta>]
 ```
 
 ---
