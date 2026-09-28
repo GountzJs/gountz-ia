@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"gz-ia/internal/features/logger"
 	"gz-ia/internal/features/tooling"
 	"gz-ia/internal/features/workspace"
 	"os"
@@ -704,3 +705,113 @@ func TestSessionStart_NonIsolatedUnprojectsOnExit(t *testing.T) {
 		t.Errorf("Unproject debió ser llamado automáticamente al finalizar la sesión no aislada")
 	}
 }
+
+type mockLoggerService struct {
+	emitted []*logger.Event
+	events  []logger.Event
+}
+
+func (m *mockLoggerService) Emit(ctx context.Context, evt *logger.Event) error {
+	m.emitted = append(m.emitted, evt)
+	return nil
+}
+
+func (m *mockLoggerService) GetEvents(ctx context.Context, sessionID string) ([]logger.Event, error) {
+	return m.events, nil
+}
+
+func (m *mockLoggerService) Watch(ctx context.Context, sessionID string) (<-chan logger.Event, error) {
+	ch := make(chan logger.Event)
+	close(ch)
+	return ch, nil
+}
+
+func TestSession_StartEventMetadata(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+	mockRun := &mockRunner{}
+	mockLog := &mockLoggerService{}
+
+	cfg := Config{
+		ID:              "meta-sess-1",
+		Provider:        "agy",
+		WorkingDir:      tmpDir,
+		InitialPrompt:   "analizar el proyecto",
+		Profiles:        []string{"gz-ia", "maintainer"},
+		PermissionLevel: PermissionAutonomous,
+	}
+
+	sess := New(cfg, mockRun, store).WithLogger(mockLog)
+	_ = sess.Start(context.Background())
+
+	if len(mockLog.emitted) < 1 {
+		t.Fatal("Se esperaba al menos un evento emitido por Start()")
+	}
+
+	startEvt := mockLog.emitted[0]
+	if startEvt.Stage != logger.StagePending {
+		t.Errorf("Stage esperado StagePending, obtenido %s", startEvt.Stage)
+	}
+	if startEvt.Metadata == nil {
+		t.Fatal("Metadata del evento START no debe ser nil")
+	}
+
+	if v, ok := startEvt.Metadata["provider"].(string); !ok || v != "agy" {
+		t.Errorf("Metadata 'provider' esperado 'agy', obtenido %v", startEvt.Metadata["provider"])
+	}
+
+	toolkits, ok := startEvt.Metadata["toolkits"]
+	if !ok {
+		t.Error("Metadata 'toolkits' no presente en evento START")
+	} else if toolkits == nil {
+		t.Error("Metadata 'toolkits' no debe ser nil")
+	}
+
+	if v, ok := startEvt.Metadata["branch"].(string); !ok || v != "harness/meta-sess-1" {
+		t.Errorf("Metadata 'branch' esperado 'harness/meta-sess-1', obtenido %v", startEvt.Metadata["branch"])
+	}
+
+	if v, ok := startEvt.Metadata["initial_prompt"].(string); !ok || v != "analizar el proyecto" {
+		t.Errorf("Metadata 'initial_prompt' esperado 'analizar el proyecto', obtenido %v", startEvt.Metadata["initial_prompt"])
+	}
+
+	if v, ok := startEvt.Metadata["working_dir"].(string); !ok || v != tmpDir {
+		t.Errorf("Metadata 'working_dir' esperado '%s', obtenido %v", tmpDir, startEvt.Metadata["working_dir"])
+	}
+}
+
+func TestSession_StartEventMetadata_PromptTruncation(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+	mockRun := &mockRunner{}
+	mockLog := &mockLoggerService{}
+
+	longPrompt := strings.Repeat("a", 250)
+	cfg := Config{
+		ID:              "trunc-sess",
+		Provider:        "agy",
+		WorkingDir:      tmpDir,
+		InitialPrompt:   longPrompt,
+		PermissionLevel: PermissionAutonomous,
+	}
+
+	sess := New(cfg, mockRun, store).WithLogger(mockLog)
+	_ = sess.Start(context.Background())
+
+	if len(mockLog.emitted) < 1 {
+		t.Fatal("Se esperaba al menos un evento")
+	}
+
+	startEvt := mockLog.emitted[0]
+	prompt, ok := startEvt.Metadata["initial_prompt"].(string)
+	if !ok {
+		t.Fatal("initial_prompt no presente en metadata")
+	}
+	if len(prompt) > 203 {
+		t.Errorf("prompt no truncado correctamente: longitud %d", len(prompt))
+	}
+	if !strings.HasSuffix(prompt, "...") {
+		t.Errorf("prompt truncado debe terminar con '...', obtenido: %s", prompt[len(prompt)-5:])
+	}
+}
+

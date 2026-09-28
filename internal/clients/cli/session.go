@@ -787,6 +787,94 @@ Semántica de integración:
 		},
 	}
 
+	// Subcomando context
+	var contextJsonFlag bool
+	contextCmd := &cobra.Command{
+		Use:   "context <id>",
+		Short: "Muestra el contexto y estado de trabajo de una sesión (handoff para agentes)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			id := args[0]
+			workDir = resolveWorkDir(c.Context(), workDir)
+			svc := getSessionService(workDir)
+			sc, err := svc.Context(c.Context(), id)
+			if err != nil {
+				return err
+			}
+
+			if contextJsonFlag {
+				data, err := json.MarshalIndent(sc, "", "  ")
+				if err != nil {
+					return fmt.Errorf("error al serializar contexto a JSON: %w", err)
+				}
+				fmt.Fprintln(c.OutOrStdout(), string(data))
+				return nil
+			}
+
+			labelStyle := lipgloss.NewStyle().Foreground(tui.ColorSecondary).Bold(true)
+			valStyle := lipgloss.NewStyle().Foreground(tui.ColorWhite)
+			mutedStyle := lipgloss.NewStyle().Foreground(tui.ColorMuted)
+			divider := lipgloss.NewStyle().Foreground(tui.ColorSubtle).Render("──────────────────────────────────────────────────────────────────────────")
+
+			fmt.Fprintln(c.OutOrStdout(), divider)
+			fmt.Fprintf(c.OutOrStdout(), "%s %s\n", labelStyle.Render("Sesión:   "), valStyle.Render(sc.SessionID))
+			fmt.Fprintf(c.OutOrStdout(), "%s %s\n", labelStyle.Render("Proveedor:"), valStyle.Render(sc.Provider))
+			fmt.Fprintf(c.OutOrStdout(), "%s %s\n", labelStyle.Render("Rama:     "), valStyle.Render(sc.Branch))
+			if len(sc.Toolkits) > 0 {
+				fmt.Fprintf(c.OutOrStdout(), "%s %s\n", labelStyle.Render("Toolkits: "), valStyle.Render(strings.Join(sc.Toolkits, ", ")))
+			}
+			fmt.Fprintf(c.OutOrStdout(), "%s %s\n", labelStyle.Render("Estado:   "), valStyle.Render(sc.Status))
+			fmt.Fprintf(c.OutOrStdout(), "%s %s\n", labelStyle.Render("Inicio:   "), valStyle.Render(sc.StartedAt.Local().Format("2006-01-02 15:04 (-07:00)")))
+			if sc.DurationMs > 0 {
+				d := time.Duration(sc.DurationMs) * time.Millisecond
+				fmt.Fprintf(c.OutOrStdout(), "%s %s\n", labelStyle.Render("Duración: "), valStyle.Render(d.Round(time.Second).String()))
+			}
+
+			if sc.InitialPrompt != "" {
+				fmt.Fprintln(c.OutOrStdout())
+				fmt.Fprintln(c.OutOrStdout(), labelStyle.Render("Tarea inicial:"))
+				fmt.Fprintf(c.OutOrStdout(), "  %s\n", mutedStyle.Render(`"`+sc.InitialPrompt+`"`))
+			}
+
+			fmt.Fprintln(c.OutOrStdout())
+			fmt.Fprintf(c.OutOrStdout(), "%s (%d eventos):\n", labelStyle.Render("Actividad registrada"), len(sc.Events))
+			for _, evt := range sc.Events {
+				timeStr := evt.Timestamp.Local().Format("15:04")
+				agentPart := ""
+				if evt.AgentID != "" && evt.AgentID != "orchestrator" {
+					rolePart := evt.Role
+					if rolePart == "" {
+						rolePart = evt.AgentID
+					}
+					agentPart = fmt.Sprintf("  [%s / %s]", rolePart, evt.AgentID)
+				}
+				statusPart := ""
+				if evt.Status != nil {
+					statusPart = " " + string(*evt.Status)
+				}
+				fmt.Fprintf(c.OutOrStdout(), "  [%s] %-8s %s%s%s\n",
+					mutedStyle.Render(timeStr),
+					string(evt.Stage),
+					evt.Action,
+					agentPart,
+					statusPart,
+				)
+			}
+
+			if sc.FilesChanged != "" {
+				fmt.Fprintln(c.OutOrStdout())
+				fmt.Fprintln(c.OutOrStdout(), labelStyle.Render("Archivos modificados:"))
+				for _, line := range strings.Split(strings.TrimSpace(sc.FilesChanged), "\n") {
+					fmt.Fprintf(c.OutOrStdout(), "  %s\n", line)
+				}
+			}
+
+			fmt.Fprintln(c.OutOrStdout(), divider)
+			return nil
+		},
+	}
+	contextCmd.Flags().BoolVarP(&contextJsonFlag, "json", "j", false, "Emite el contexto como JSON a stdout")
+
 	cmd.AddCommand(listCmd)
 	cmd.AddCommand(killCmd)
 	cmd.AddCommand(resumeCmd)
@@ -802,6 +890,7 @@ Semántica de integración:
 	cmd.AddCommand(logsCmd)
 	cmd.AddCommand(cleanupCmd)
 	cmd.AddCommand(pruneCmd)
+	cmd.AddCommand(contextCmd)
 
 	return cmd
 }

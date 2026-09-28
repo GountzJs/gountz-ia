@@ -1145,3 +1145,103 @@ func TestService_Prune_UnprojectsTerminatedSessions(t *testing.T) {
 		t.Errorf("El archivo %s debió ser desproyectado durante Prune", createdPath)
 	}
 }
+
+func TestSessionService_Context(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+	loggerSvc := logger.NewService(tmpDir)
+	ctx := context.Background()
+
+	sessID := "ctx-svc-test"
+	_ = store.Save(&SessionRecord{
+		ID:         sessID,
+		Provider:   "agy",
+		Status:     StatusCompleted,
+		WorkingDir: tmpDir,
+		Profiles:   []string{"gz-ia"},
+		StartedAt:  time.Now().Add(-1 * time.Hour),
+	})
+
+	st := logger.StatusOK
+	_ = loggerSvc.Emit(ctx, &logger.Event{
+		SessionID: sessID,
+		AgentID:   "orchestrator",
+		Role:      "orchestrator",
+		Action:    "Sesión de chat iniciada",
+		Stage:     logger.StagePending,
+		Metadata: map[string]any{
+			"provider":       "agy",
+			"toolkits":       []string{"gz-ia"},
+			"branch":         "harness/" + sessID,
+			"initial_prompt": "analizar workspace",
+			"working_dir":    tmpDir,
+		},
+	})
+	_ = loggerSvc.Emit(ctx, &logger.Event{
+		SessionID: sessID,
+		AgentID:   "orchestrator",
+		Role:      "orchestrator",
+		Action:    "Sesión finalizada exitosamente",
+		Stage:     logger.StageFinish,
+		Status:    &st,
+		Metadata: map[string]any{
+			"exit_code":     0,
+			"duration_s":    int64(3600),
+			"files_changed": "internal/foo.go | 12 ++++",
+		},
+	})
+
+	svc := NewService(tmpDir, WithStore(store), WithLogger(loggerSvc))
+
+	sc, err := svc.Context(ctx, sessID)
+	if err != nil {
+		t.Fatalf("Context() falló: %v", err)
+	}
+
+	if sc.SessionID != sessID {
+		t.Errorf("SessionID esperado '%s', obtenido '%s'", sessID, sc.SessionID)
+	}
+	if sc.Provider != "agy" {
+		t.Errorf("Provider esperado 'agy', obtenido '%s'", sc.Provider)
+	}
+	if sc.Branch != "harness/"+sessID {
+		t.Errorf("Branch esperado 'harness/%s', obtenido '%s'", sessID, sc.Branch)
+	}
+	if sc.InitialPrompt != "analizar workspace" {
+		t.Errorf("InitialPrompt esperado 'analizar workspace', obtenido '%s'", sc.InitialPrompt)
+	}
+	if len(sc.Toolkits) == 0 {
+		t.Error("Toolkits no debe ser vacío")
+	}
+	if sc.FilesChanged == "" {
+		t.Error("FilesChanged debe estar poblado desde metadata del evento FINISH")
+	}
+	if len(sc.Events) != 2 {
+		t.Errorf("Se esperaban 2 eventos, obtenidos %d", len(sc.Events))
+	}
+	if sc.Status != string(StatusCompleted) {
+		t.Errorf("Status esperado '%s', obtenido '%s'", StatusCompleted, sc.Status)
+	}
+
+	_, err = svc.Context(ctx, "inexistente")
+	if err == nil {
+		t.Error("Context() debió retornar error para sesión inexistente")
+	}
+}
+
+func TestSessionService_Context_NilDependencies(t *testing.T) {
+	ctx := context.Background()
+
+	svcNoStore := &sessionService{}
+	if _, err := svcNoStore.Context(ctx, "id"); err == nil {
+		t.Error("Context con store nil debió fallar")
+	}
+
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+	svcNoLogger := &sessionService{store: store}
+	if _, err := svcNoLogger.Context(ctx, "id"); err == nil {
+		t.Error("Context con logger nil debió fallar")
+	}
+}
+

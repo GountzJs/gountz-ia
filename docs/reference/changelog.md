@@ -6,6 +6,42 @@ El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1
 
 ---
 
+## [0.3.0] - 2026-09-28
+
+### En desarrollo
+
+> Pendiente de definición de alcance.
+
+---
+
+## [0.2.0] - 2026-09-28
+
+### Observabilidad MCP, Prompt Orquestador y Cobertura de Tests
+
+Esta versión introduce el plugin nativo de observabilidad para agentes vía MCP, el prompt de orquestador por defecto en el CLI, el rastreo de archivos proyectados en el manifiesto de sesión, cobertura ampliada de tests en `metrics`, `logger`, `session` y `cli`, y la incorporación de los tres toolkits de equipo al repositorio.
+
+#### Novedades y Mejoras
+
+- **Plugin `ObservabilityPlugin` (`packages/orchy/batteries/observability/`):**
+  - Herramienta MCP `session_log` que permite a agentes emitir eventos de trazabilidad (etapas `READ`, `PENDING`, `FINISH`) al log de sesión activa desde cualquier contexto MCP, sin acceso directo al sistema de archivos.
+- **Prompt de Orquestador por Defecto (`internal/features/session/service.go`):**
+  - Método `DefaultOrchestratorPrompt` que genera el prompt inicial cuando `gz-ia chat` se invoca sin la bandera `-i`, consolidando el contexto de sesión, workspace y toolkits activos.
+- **Campo `projected_files` en Sesión (`internal/features/session/session.go`, `store.go`):**
+  - Rastreo persistente de archivos proyectados por toolkits en el worktree dentro del manifiesto de sesión, habilitando fusiones no destructivas y auditoría de proyección.
+- **Manifiesto de Workspace Enriquecido (`internal/features/workspace/manifest.go`):**
+  - Campos `toolkits` y `projected_files` añadidos al manifiesto de workspace con serialización completa y tests de cobertura (`manifest_test.go`).
+- **`ProjectIntoWorktree` Mejorado (`internal/features/tooling/service.go`):**
+  - Escritura del manifiesto enriquecido de archivos proyectados (`ProjectedFiles`) durante la proyección de toolkits en el worktree.
+- **Cobertura de Tests Ampliada:**
+  - `internal/features/session/session_test.go` y `service_test.go`: ciclo de vida completo de sesión, manifiesto, prune y cleanup.
+  - `internal/features/metrics/service.go` y `metrics_test.go`: cobertura de `EstimateTokens` y sesiones sin transcripción.
+  - `internal/features/logger/store.go` y `logger_test.go`: filtrado por `SessionID` en lectura de JSONL y cobertura ampliada de watch/emit.
+  - `internal/clients/cli/`: tests de integración para `chat`, `mcp`, `session` y detección de `DefaultOrchestratorPrompt`.
+- **Toolkits de Equipo en Repositorio (`.agents/toolkits/`):**
+  - Tres toolkits versionados añadidos al repositorio: `TOOLKIT_GZ_IA-AGENTS.md`, `TOOLKIT_MAINTAINER_GZ_IA-AGENTS.md` y `TOOLKIT_CONVENTIONAL_COMMIT-AGENTS.md`.
+
+---
+
 ## [0.1.0] - 2026-09-27
 
 ### Consolidación — Toolkits de Equipo en Git, Seguridad en Vault y Estabilidad de Terminal
