@@ -72,7 +72,7 @@ Si tu agente necesita ejecutar tests o linters que dependen de `node_modules`, t
 
 ## 4. ¿Funciona en macOS? ¿Y en Windows?
 
-Compatibilidad por plataforma en la versión actual (v0.1.0):
+Compatibilidad por plataforma en la versión actual (v0.4.0):
 
 | Plataforma | Estado | Detalle |
 | :--- | :--- | :--- |

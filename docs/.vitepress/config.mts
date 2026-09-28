@@ -21,7 +21,7 @@ export default withMermaid(
       { text: 'Microkernel Orchy', link: '/orchy/microkernel', activeMatch: '/orchy/' },
       { text: 'Referencia CLI & API', link: '/reference/cli', activeMatch: '/reference/' },
       {
-        text: 'v0.1.0',
+        text: 'v0.4.0',
         items: [
           { text: 'Changelog', link: '/reference/changelog' },
           { text: 'Repositorio', link: 'https://github.com/GountzJs/gountz-ia' }

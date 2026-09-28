@@ -141,11 +141,8 @@ gz-ia session list
 gz-ia session read <session_id>
 gz-ia session read <session_id> --stat
 
-# Integrar los cambios producidos al workspace activo
-gz-ia session get <session_id> --no-commit
-
-# O fusionar directamente con un commit condensado (squash)
-gz-ia session get <session_id> --squash
+# Integrar los cambios producidos al workspace activo (como cambios unstaged)
+gz-ia session get <session_id>
 ```
 
 ### 5. Vault de Secretos y Variables de Entorno

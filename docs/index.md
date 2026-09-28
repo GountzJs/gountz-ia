@@ -95,6 +95,6 @@ gz-ia start
 
 ## Estado del Proyecto
 
-`gz-ia` se encuentra en **versión v0.1.0**. El aislamiento en Git y la proyección de toolkits son operativos en **Linux (amd64)** y en validación para **macOS**. En **Windows** existen restricciones de bloqueo de archivos al actualizar binarios en caliente.
+`gz-ia` se encuentra en **versión v0.4.0**. El aislamiento en Git y la proyección de toolkits son operativos en **Linux (amd64)** y en validación para **macOS**. En **Windows** existen restricciones de bloqueo de archivos al actualizar binarios en caliente.
 
 Consulta [Estado y Limitaciones Conocidas](/guide/limitations) y [Preguntas Frecuentes](/guide/faq).

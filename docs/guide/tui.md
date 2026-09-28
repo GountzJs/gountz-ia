@@ -25,7 +25,7 @@ Al abrir `gz-ia`, la TUI presenta el banner de telemetría Fastfetch con arte Br
 │ ⠀⠀⣀⣀⣀⣠⠤⠤⠤⠖⠒⠒⠊⠉⠉⠓⢄⡀⠀⠀⠀⠀⠀⠀   developer@gz-ia                                │
 │ ⡞⠫⣅⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠲⣄⠀⠀⠀⠀   ────────────────────────────────────────        │
 │ ⡇⠀⠈⠓⢦⡀⠀⠀⠀⠀⢀⣀⣀⣀⣤⣤⣤⣶⣶⡒⠛⡆⠀⠀   >_ Harness     ❯ gz-ia (core)                   │
-│ ⡇⠀⠀⠀⠀⠙⡷⠚⣻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⡇⠀⠀   ✦ Versión      ❯ v0.0.1                         │
+│ ⡇⠀⠀⠀⠀⠙⡷⠚⣻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⡇⠀⠀   ✦ Versión      ❯ v0.4.0                         │
 │ ⡇⠻⣆⠀⠀⠀⡇⣼⣿⣿⣿⠿⠿⢿⡿⠟⢉⣉⡁⠉⠉⡇⠀⠀   ⌥ Workspace    ❯ gz-ia                          │
 │ ⡇⢀⣽⠇⠀⠀⡁⠉⠁⡤⣴⣶⣶⠀⣠⡀⠻⠿⠿⠏⢠⣇⠔⠀   ⚙ Arquitectura ❯ Desacoplada / Modular          │
 │ ⡇⠛⢁⡀⠀⠀⡇⣿⣆⠐⠚⠛⠉⣠⣀⣠⣤⢰⣆⠀⠀⠈⠀⡀   📦 Runtime     ❯ go1.23.1                       │
@@ -71,7 +71,7 @@ El asistente de lanzamiento opera en dos pasos guiados con validación activa:
 Permite gestionar los registros locales de `.harness/sessions/`:
 - **Ver Detalles:** Muestra el ID de sesión, estado (`RUNNING`, `COMPLETED`, `FAILED`, `KILLED`), rama de git asociada, ruta del worktree y métricas de ejecución.
 - **Inspeccionar Worktree (`read`):** Visor integrado de diffs con coloreado de sintaxis (altas en verde, bajas en rojo, hunks en azul).
-- **Traer Cambios (`get`):** Diálogo interactivo de confirmación para incorporar cambios validados al workspace actual mediante squash o commit regular.
+- **Traer Cambios (`get`):** Diálogo interactivo de confirmación para incorporar cambios validados al workspace actual como modificaciones no preparadas (*unstaged*).
 - **Reanudar Sesión (`resume`):** Reconecta la terminal con el agente original usando `--continue` o `--resume` en su worktree correspondiente.
 - **Detener Proceso (`kill`):** Envía señales (`SIGTERM` seguido de `SIGKILL` si es necesario en Unix, o `taskkill /F /T` en Windows) para finalizar agentes en segundo plano.
 - **Eliminar Registro (`delete`):** Limpia la metadata de la sesión y destruye el worktree y la rama de Git asociada de forma segura.

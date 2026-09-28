@@ -1,6 +1,6 @@
 # Estado del Proyecto y Limitaciones Conocidas
 
-`gz-ia` se encuentra en versión **v0.1.0**. Esta sección documenta las limitaciones técnicas conocidas y consideraciones de configuración para el entorno de trabajo.
+`gz-ia` se encuentra en versión **v0.4.0**. Esta sección documenta las limitaciones técnicas conocidas y consideraciones de configuración para el entorno de trabajo.
 
 ---
 
