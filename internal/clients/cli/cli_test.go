@@ -2667,3 +2667,51 @@ func TestSessionContextCmd_JSON(t *testing.T) {
 	}
 }
 
+
+func TestMemoryCmd_SaveSearchListConsolidate(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+
+	// 1. save
+	cmd.SetArgs([]string{"memory", "save", "-t", "Regla de testing", "-c", "Utilizar go test -count=1", "--category", "rule", "--tags", "go,testing", "--session", "sess_cli_1", "--dir", tmpDir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("memory save falló: %v", err)
+	}
+	if !strings.Contains(buf.String(), "guardada exitosamente") {
+		t.Errorf("salida inesperada en save: %s", buf.String())
+	}
+
+	// 2. list
+	buf.Reset()
+	cmd.SetArgs([]string{"memory", "list", "--session", "sess_cli_1", "--dir", tmpDir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("memory list falló: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Regla de testing") {
+		t.Errorf("salida inesperada en list: %s", buf.String())
+	}
+
+	// 3. search
+	buf.Reset()
+	cmd.SetArgs([]string{"memory", "search", "testing", "--session", "sess_cli_1", "--dir", tmpDir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("memory search falló: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Regla de testing") {
+		t.Errorf("salida inesperada en search: %s", buf.String())
+	}
+
+	// 4. consolidate
+	buf.Reset()
+	cmd.SetArgs([]string{"memory", "consolidate", "sess_cli_1", "--dir", tmpDir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("memory consolidate falló: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Se consolidaron 1 memorias") {
+		t.Errorf("salida inesperada en consolidate: %s", buf.String())
+	}
+}
