@@ -803,17 +803,17 @@ func (c *Client) executeSessionAction(action string, rec *session.SessionRecord,
 		confirmForm = c.prepareForm(confirmForm)
 
 		if err := confirmForm.Run(); err == nil && confirm {
-			res, err := svc.Get(context.Background(), rec.ID, session.MergeOptions{})
+			res, err := svc.Get(context.Background(), rec.ID)
 			if err != nil {
-				fmt.Fprintf(out, "%s Error al integrar worktree: %v\n\n", icons.Cross, err)
+				fmt.Fprintf(out, "%s Error al traer cambios del worktree: %v\n\n", icons.Cross, err)
 			} else if res.AlreadyUpToDate {
 				fmt.Fprintf(out, "%s La rama ya está actualizada. No hay cambios pendientes.\n\n", icons.Sparkle)
 			} else {
 				successMsg := lipgloss.NewStyle().Foreground(ColorSuccess).Bold(true).
-					Render(fmt.Sprintf("%s Cambios del worktree de la sesión '%s' integrados exitosamente.\n", icons.Check, rec.ID))
+					Render(fmt.Sprintf("%s Cambios del worktree de la sesión '%s' traídos al workspace activo (unstaged).\n", icons.Check, rec.ID))
 				fmt.Fprintln(out, successMsg)
 				if len(res.FilesIntegrated) > 0 {
-					fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(ColorSecondary).Render("Archivos integrados:"))
+					fmt.Fprintln(out, lipgloss.NewStyle().Bold(true).Foreground(ColorSecondary).Render("Archivos traídos (unstaged):"))
 					for _, f := range res.FilesIntegrated {
 						fmt.Fprintf(out, "  • %s\n", f)
 					}

@@ -336,6 +336,10 @@ func (m *mockWorkspaceProvider) MergeWorktree(ctx context.Context, sessionID str
 	return &workspace.MergeResult{AlreadyUpToDate: true}, nil
 }
 
+func (m *mockWorkspaceProvider) GetWorktree(ctx context.Context, sessionID string, baseDir string, worktreeDir string, branchName string) (*workspace.MergeResult, error) {
+	return &workspace.MergeResult{AlreadyUpToDate: true}, nil
+}
+
 func (m *mockWorkspaceProvider) Prune(ctx context.Context, baseDir string, activeSessionIDs []string) (*workspace.PruneReport, error) {
 	return &workspace.PruneReport{}, nil
 }

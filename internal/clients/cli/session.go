@@ -367,56 +367,39 @@ func newSessionCmd() *cobra.Command {
 	readCmd.Flags().BoolVar(&readStatFlag, "stat", false, "Muestra solo el resumen estadístico de archivos modificados")
 
 	// Subcomando get
-	var getSquashFlag bool
-	var getNoCommitFlag bool
 	getCmd := &cobra.Command{
 		Use:   "get <id>",
-		Short: "Trae e integra los cambios del worktree de sesión hacia el directorio de trabajo activo",
-		Long: `Trae e integra los cambios producidos en el worktree de sesión hacia la rama activa del repositorio.
-
-Semántica de integración:
-1. Si hay cambios pendientes en el worktree, crea un commit de seguridad en la rama 'harness/<id>'.
-2. Ejecuta un git merge (o git merge --squash con --squash, y sin commit si se pasa --no-commit) de la rama 'harness/<id>' en la rama base activa del repositorio.
-3. Si la rama base avanzó y existen conflictos, Git se detiene sin sobreescribir tus archivos, informa los archivos en conflicto y mantiene el worktree de la sesión intacto para resolución manual ('gz-ia session path <id>') o abortar ('git merge --abort').`,
-		Args: cobra.ExactArgs(1),
+		Short: "Trae los cambios del worktree de sesión hacia el directorio de trabajo activo (unstaged)",
+		Long:  `Trae los archivos modificados y creados en el worktree de sesión hacia el directorio de trabajo activo sin realizar commits ni merges de Git, dejándolos como cambios no preparados (unstaged).`,
+		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			id := args[0]
 			workDir = resolveWorkDir(c.Context(), workDir)
 			svc := getSessionService(workDir)
-			res, err := svc.Get(c.Context(), id, session.MergeOptions{
-				Squash:   getSquashFlag,
-				NoCommit: getNoCommitFlag,
-			})
+			res, err := svc.Get(c.Context(), id)
 			if err != nil {
 				return err
 			}
 
 			icons := tui.GetIcons()
 			if res.AlreadyUpToDate {
-				fmt.Fprintln(c.OutOrStdout(), lipgloss.NewStyle().Foreground(tui.ColorMuted).Render(fmt.Sprintf("%s La rama ya está actualizada. No hay cambios pendientes para fusionar.", icons.Sparkle)))
+				fmt.Fprintln(c.OutOrStdout(), lipgloss.NewStyle().Foreground(tui.ColorMuted).Render(fmt.Sprintf("%s La rama ya está actualizada. No hay cambios pendientes.", icons.Sparkle)))
 				return nil
 			}
 
 			successMsg := lipgloss.NewStyle().Foreground(tui.ColorSuccess).Bold(true).
-				Render(fmt.Sprintf("%s Cambios del worktree traídos e integrados con éxito para la sesión '%s'.", icons.Check, id))
+				Render(fmt.Sprintf("%s Cambios del worktree traídos al workspace activo para la sesión '%s'.", icons.Check, id))
 			fmt.Fprintln(c.OutOrStdout(), successMsg)
 
 			if len(res.FilesIntegrated) > 0 {
-				fmt.Fprintln(c.OutOrStdout(), lipgloss.NewStyle().Bold(true).Foreground(tui.ColorSecondary).Render("Archivos integrados:"))
+				fmt.Fprintln(c.OutOrStdout(), lipgloss.NewStyle().Bold(true).Foreground(tui.ColorSecondary).Render("Archivos traídos (unstaged):"))
 				for _, f := range res.FilesIntegrated {
 					fmt.Fprintf(c.OutOrStdout(), "  • %s\n", f)
 				}
 			}
-			if getSquashFlag && getNoCommitFlag {
-				fmt.Fprintln(c.OutOrStdout(), lipgloss.NewStyle().Foreground(tui.ColorWarning).Render("Nota: Los cambios quedaron preparados en el stage sin comitear (--squash --no-commit)."))
-			} else if getNoCommitFlag {
-				fmt.Fprintln(c.OutOrStdout(), lipgloss.NewStyle().Foreground(tui.ColorWarning).Render("Nota: Los cambios quedaron preparados en el stage sin comitear (--no-commit)."))
-			}
 			return nil
 		},
 	}
-	getCmd.Flags().BoolVar(&getSquashFlag, "squash", false, "Condensa los cambios en un único commit sin merge commit")
-	getCmd.Flags().BoolVar(&getNoCommitFlag, "no-commit", false, "Deja los cambios preparados en el stage del repo principal sin comitear")
 
 	// Subcomando metrics
 	var jsonFlag bool

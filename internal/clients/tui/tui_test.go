@@ -70,6 +70,9 @@ func (m *mockTUIWorkspace) DiffWorktree(ctx context.Context, baseDir string, wor
 func (m *mockTUIWorkspace) MergeWorktree(ctx context.Context, sessionID string, baseDir string, worktreeDir string, branchName string, squash bool, noCommit bool) (*workspace.MergeResult, error) {
 	return &workspace.MergeResult{AlreadyUpToDate: true}, nil
 }
+func (m *mockTUIWorkspace) GetWorktree(ctx context.Context, sessionID string, baseDir string, worktreeDir string, branchName string) (*workspace.MergeResult, error) {
+	return &workspace.MergeResult{AlreadyUpToDate: true}, nil
+}
 func (m *mockTUIWorkspace) Prune(ctx context.Context, baseDir string, activeSessionIDs []string) (*workspace.PruneReport, error) {
 	return &workspace.PruneReport{}, nil
 }
@@ -336,7 +339,7 @@ func TestRenderWorktreeDiffViewer(t *testing.T) {
 
 type mockTUISessionService struct {
 	readFunc      func(ctx context.Context, id string, statOnly bool) (string, error)
-	getFunc       func(ctx context.Context, id string, opts session.MergeOptions) (*workspace.MergeResult, error)
+	getFunc       func(ctx context.Context, id string) (*workspace.MergeResult, error)
 	startChatFunc func(ctx context.Context, req session.StartChatRequest) error
 }
 
@@ -386,9 +389,9 @@ func (m *mockTUISessionService) Read(ctx context.Context, id string, statOnly bo
 	return "", nil
 }
 
-func (m *mockTUISessionService) Get(ctx context.Context, id string, opts session.MergeOptions) (*workspace.MergeResult, error) {
+func (m *mockTUISessionService) Get(ctx context.Context, id string) (*workspace.MergeResult, error) {
 	if m.getFunc != nil {
-		return m.getFunc(ctx, id, opts)
+		return m.getFunc(ctx, id)
 	}
 	return &workspace.MergeResult{AlreadyUpToDate: true}, nil
 }
@@ -440,10 +443,10 @@ func TestHandleSessionDetail_Read(t *testing.T) {
 func TestHandleSessionDetail_Get_Success(t *testing.T) {
 	var getCalled bool
 	mockSvc := &mockTUISessionService{
-		getFunc: func(ctx context.Context, id string, opts session.MergeOptions) (*workspace.MergeResult, error) {
+		getFunc: func(ctx context.Context, id string) (*workspace.MergeResult, error) {
 			getCalled = true
 			return &workspace.MergeResult{
-				Message:         "merged successfully",
+				Message:         "integrated successfully",
 				FilesIntegrated: []string{"app.go", "config.go"},
 				AlreadyUpToDate: false,
 			}, nil
@@ -470,7 +473,7 @@ func TestHandleSessionDetail_Get_Success(t *testing.T) {
 	}
 
 	out := outBuf.String()
-	if !strings.Contains(out, "integrados exitosamente") {
+	if !strings.Contains(out, "traídos al workspace activo") {
 		t.Errorf("expected success notification, got: %s", out)
 	}
 	if !strings.Contains(out, "app.go") || !strings.Contains(out, "config.go") {
@@ -481,7 +484,7 @@ func TestHandleSessionDetail_Get_Success(t *testing.T) {
 func TestHandleSessionDetail_Get_Declined(t *testing.T) {
 	var getCalled bool
 	mockSvc := &mockTUISessionService{
-		getFunc: func(ctx context.Context, id string, opts session.MergeOptions) (*workspace.MergeResult, error) {
+		getFunc: func(ctx context.Context, id string) (*workspace.MergeResult, error) {
 			getCalled = true
 			return &workspace.MergeResult{}, nil
 		},

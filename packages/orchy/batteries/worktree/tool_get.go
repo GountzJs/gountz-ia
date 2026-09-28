@@ -83,10 +83,7 @@ func (t *WorktreeGetTool) Execute(ctx context.Context, input any) (any, error) {
 		return nil, errors.New("session_id is required")
 	}
 
-	res, err := t.sessionService.Get(ctx, params.SessionID, session.MergeOptions{
-		Squash:   params.Squash,
-		NoCommit: params.NoCommit,
-	})
+	res, err := t.sessionService.Get(ctx, params.SessionID)
 	if err != nil {
 		return nil, err
 	}

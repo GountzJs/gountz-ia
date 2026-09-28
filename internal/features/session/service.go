@@ -46,7 +46,7 @@ type Service interface {
 	List(ctx context.Context) ([]SessionRecord, error)
 	GetRecord(ctx context.Context, id string) (*SessionRecord, error)
 	GetSession(ctx context.Context, id string) (*SessionRecord, error)
-	Get(ctx context.Context, id string, opts MergeOptions) (*workspace.MergeResult, error)
+	Get(ctx context.Context, id string) (*workspace.MergeResult, error)
 	Read(ctx context.Context, id string, statOnly bool) (string, error)
 	Kill(ctx context.Context, id string) error
 	Resume(ctx context.Context, id string) error
@@ -508,8 +508,31 @@ func (s *sessionService) Read(ctx context.Context, id string, statOnly bool) (st
 	return s.Diff(ctx, id, statOnly)
 }
 
-func (s *sessionService) Get(ctx context.Context, id string, opts MergeOptions) (*workspace.MergeResult, error) {
-	return s.Merge(ctx, id, opts)
+func (s *sessionService) Get(ctx context.Context, id string) (*workspace.MergeResult, error) {
+	if s.store == nil {
+		return nil, errors.New("store no inicializado")
+	}
+
+	record, err := s.store.Get(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if !record.IsIsolated {
+		return nil, fmt.Errorf("la sesión '%s' se ejecutó en modo directo y no cuenta con una rama de worktree aislada para traer cambios", id)
+	}
+
+	branchName := record.BranchName
+	if branchName == "" {
+		branchName = "harness/" + record.ID
+	}
+
+	ws := s.workspace
+	if ws == nil {
+		ws = workspace.NewDefaultProvider()
+	}
+
+	return ws.GetWorktree(ctx, record.ID, record.WorkingDir, record.WorktreeDir, branchName)
 }
 
 func (s *sessionService) Metrics(ctx context.Context, id string) (*metrics.SessionMetrics, error) {

@@ -607,6 +607,10 @@ func (m *mockCLIWorkspaceProvider) MergeWorktree(ctx context.Context, sessionID 
 	return m.mergeReturn, m.mergeErr
 }
 
+func (m *mockCLIWorkspaceProvider) GetWorktree(ctx context.Context, sessionID string, baseDir string, worktreeDir string, branchName string) (*workspace.MergeResult, error) {
+	return m.mergeReturn, m.mergeErr
+}
+
 func (m *mockCLIWorkspaceProvider) Prune(ctx context.Context, baseDir string, activeSessionIDs []string) (*workspace.PruneReport, error) {
 	return &workspace.PruneReport{}, nil
 }
@@ -1336,7 +1340,7 @@ func TestSessionCmd_Get_Success(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "Cambios del worktree traídos e integrados con éxito") {
+	if !strings.Contains(out, "Cambios del worktree traídos al workspace activo") {
 		t.Errorf("get no muestra mensaje de éxito: %s", out)
 	}
 	if !strings.Contains(out, "main.go") || !strings.Contains(out, "util.go") {
@@ -1344,7 +1348,7 @@ func TestSessionCmd_Get_Success(t *testing.T) {
 	}
 }
 
-func TestSessionCmd_Get_SquashAndNoCommit(t *testing.T) {
+func TestSessionCmd_Get_Unstaged(t *testing.T) {
 	tmpDir := t.TempDir()
 	store := session.NewFileStore(tmpDir)
 	_ = store.Save(&session.SessionRecord{
@@ -1358,7 +1362,7 @@ func TestSessionCmd_Get_SquashAndNoCommit(t *testing.T) {
 
 	mockWS := &mockCLIWorkspaceProvider{
 		mergeReturn: &workspace.MergeResult{
-			Message:         "squash merge ok",
+			Message:         "get ok",
 			FilesIntegrated: []string{"flagged.go"},
 			AlreadyUpToDate: false,
 		},
@@ -1376,18 +1380,18 @@ func TestSessionCmd_Get_SquashAndNoCommit(t *testing.T) {
 	cmd := NewRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{"session", "get", "get_flags_sess", "--squash", "--no-commit", "--dir", tmpDir})
+	cmd.SetArgs([]string{"session", "get", "get_flags_sess", "--dir", tmpDir})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("session get falló: %v", err)
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "Cambios del worktree traídos e integrados con éxito") {
+	if !strings.Contains(out, "Cambios del worktree traídos al workspace activo") {
 		t.Errorf("mensaje de éxito no presente: %s", out)
 	}
-	if !strings.Contains(out, "stage sin comitear") {
-		t.Errorf("nota de stage no-commit no presente: %s", out)
+	if !strings.Contains(out, "Archivos traídos (unstaged):") {
+		t.Errorf("nota de unstaged no presente: %s", out)
 	}
 }
 

@@ -66,6 +66,7 @@ type Provider interface {
 	CleanupWorktree(ctx context.Context, baseDir string, worktreeDir string, branchName string) error
 	DiffWorktree(ctx context.Context, baseDir string, worktreeDir string, branchName string, statOnly bool) (string, error)
 	MergeWorktree(ctx context.Context, sessionID string, baseDir string, worktreeDir string, branchName string, squash bool, noCommit bool) (*MergeResult, error)
+	GetWorktree(ctx context.Context, sessionID string, baseDir string, worktreeDir string, branchName string) (*MergeResult, error)
 	Prune(ctx context.Context, baseDir string, activeSessionIDs []string) (*PruneReport, error)
 }
 
@@ -739,6 +740,115 @@ func (p *GitProvider) MergeWorktree(ctx context.Context, sessionID string, baseD
 		Message:         strings.TrimSpace(mergeOut),
 		FilesIntegrated: integratedFiles,
 		AlreadyUpToDate: alreadyUpToDate,
+	}, nil
+}
+
+// GetWorktree trae las modificaciones y archivos creados en el worktree hacia el directorio activo como cambios no preparados (unstaged), sin realizar commits ni merges de Git.
+func (p *GitProvider) GetWorktree(ctx context.Context, sessionID string, baseDir string, worktreeDir string, branchName string) (*MergeResult, error) {
+	if baseDir == "" {
+		var err error
+		baseDir, err = os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("error al obtener directorio de trabajo: %w", err)
+		}
+	}
+
+	if !p.IsGitAvailable(ctx, baseDir) {
+		return nil, errors.New("git no está disponible o el directorio no es un repositorio git")
+	}
+
+	if branchName == "" {
+		branchName = "harness/" + sessionID
+	}
+
+	// 1. Si en el worktree hay archivos sin comitear, comitearlos en la rama del worktree para empaquetar los cambios
+	if worktreeDir != "" {
+		if fi, err := os.Stat(worktreeDir); err == nil && fi.IsDir() {
+			manifest, _ := LoadManifest(baseDir, sessionID)
+			if manifest != nil {
+				for relPath, origContent := range manifest.OriginalFiles {
+					filePath := filepath.Join(worktreeDir, relPath)
+					if curBytes, err := os.ReadFile(filePath); err == nil {
+						curHash := HashBytes(curBytes)
+						expectedHash, ok := manifest.ProjectedHash[relPath]
+						origHash := HashBytes([]byte(origContent))
+						if ok && curHash == expectedHash {
+							_ = os.WriteFile(filePath, []byte(origContent), 0644)
+						} else if curHash != origHash {
+							_ = os.WriteFile(filePath, []byte(origContent), 0644)
+							fmt.Fprintf(os.Stderr, "ADVERTENCIA: el archivo proyectado '%s' fue modificado por el agente. Se restauró su contenido original para evitar fuga de configuraciones internas o credenciales en la rama base.\n", relPath)
+						}
+					}
+				}
+
+				for _, relPath := range manifest.CreatedFiles {
+					filePath := filepath.Join(worktreeDir, relPath)
+					if curBytes, err := os.ReadFile(filePath); err == nil {
+						expectedHash, ok := manifest.ProjectedHash[relPath]
+						if ok && HashBytes(curBytes) != expectedHash {
+							fmt.Fprintf(os.Stderr, "ADVERTENCIA: el archivo proyectado '%s' creado por gz-ia fue modificado por el agente. Se elimina para proteger la rama base.\n", relPath)
+						}
+						_ = os.Remove(filePath)
+						_, _ = p.git.Run(ctx, worktreeDir, "rm", "-f", "--cached", "--ignore-unmatch", relPath)
+					} else {
+						if _, lerr := os.Lstat(filePath); lerr == nil {
+							_ = os.RemoveAll(filePath)
+							_, _ = p.git.Run(ctx, worktreeDir, "rm", "-rf", "--cached", "--ignore-unmatch", relPath)
+						}
+					}
+				}
+				_ = removeEmptyDirs(filepath.Join(worktreeDir, ".agents"))
+			}
+
+			statusOut, _ := p.git.Run(ctx, worktreeDir, "status", "--porcelain")
+			if strings.TrimSpace(statusOut) != "" {
+				if _, err := p.git.Run(ctx, worktreeDir, "add", "-A"); err != nil {
+					return nil, fmt.Errorf("error al preparar cambios en worktree: %w", err)
+				}
+				commitMsg := fmt.Sprintf("chore(harness): session %s changes", sessionID)
+				cOut, err := p.git.Run(ctx, worktreeDir, "commit", "--no-verify", "-m", commitMsg)
+				if err != nil {
+					combined := err.Error() + " " + cOut
+					if strings.Contains(combined, "user.name") || strings.Contains(combined, "tell me who you are") {
+						_, _ = p.git.Run(ctx, worktreeDir, "-c", "user.name=gz-ia", "-c", "user.email=gz-ia@localhost", "commit", "--no-verify", "-m", commitMsg)
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Extraer lista de archivos que diferencian a branchName respecto a HEAD en baseDir
+	var integratedFiles []string
+	diffNamesOut, _ := p.git.Run(ctx, baseDir, "diff", "--name-only", "HEAD..."+branchName)
+	for _, f := range strings.Split(diffNamesOut, "\n") {
+		f = strings.TrimSpace(f)
+		if f != "" {
+			integratedFiles = append(integratedFiles, f)
+		}
+	}
+
+	if len(integratedFiles) == 0 {
+		return &MergeResult{
+			Message:         "La rama ya está actualizada. No hay cambios pendientes.",
+			FilesIntegrated: nil,
+			AlreadyUpToDate: true,
+		}, nil
+	}
+
+	// 3. Traer los archivos del branch sin realizar git merge (vía checkout + reset)
+	args := append([]string{"checkout", branchName, "--"}, integratedFiles...)
+	out, err := p.git.Run(ctx, baseDir, args...)
+	if err != nil {
+		return nil, fmt.Errorf("error al traer archivos del worktree: %w (%s)", err, out)
+	}
+
+	// 4. Despreparar todos los cambios para que queden 100% unstaged (editados/untracked en working tree)
+	_, _ = p.git.Run(ctx, baseDir, "reset")
+
+	return &MergeResult{
+		Message:         "Cambios traídos al workspace activo (unstaged).",
+		FilesIntegrated: integratedFiles,
+		AlreadyUpToDate: false,
 	}, nil
 }
 

@@ -102,6 +102,10 @@ func (m *mockServiceWorkspace) MergeWorktree(ctx context.Context, sessionID stri
 	return m.mergeReturn, m.mergeErr
 }
 
+func (m *mockServiceWorkspace) GetWorktree(ctx context.Context, sessionID string, baseDir string, worktreeDir string, branchName string) (*workspace.MergeResult, error) {
+	return m.mergeReturn, m.mergeErr
+}
+
 func (m *mockServiceWorkspace) Prune(ctx context.Context, baseDir string, activeSessionIDs []string) (*workspace.PruneReport, error) {
 	return &workspace.PruneReport{}, nil
 }
@@ -607,7 +611,7 @@ func TestService_Read_And_Get_Parity(t *testing.T) {
 	}
 
 	// Get tests
-	res, err := svc.Get(context.Background(), "wt_iso", MergeOptions{Squash: true, NoCommit: true})
+	res, err := svc.Get(context.Background(), "wt_iso")
 	if err != nil {
 		t.Fatalf("Get falló: %v", err)
 	}
@@ -615,7 +619,7 @@ func TestService_Read_And_Get_Parity(t *testing.T) {
 		t.Errorf("Get result obtenido %v, esperado %v", res, expectedRes)
 	}
 
-	_, err = svc.Get(context.Background(), "wt_dir", MergeOptions{})
+	_, err = svc.Get(context.Background(), "wt_dir")
 	if err == nil {
 		t.Error("Get en sesión directa debió fallar")
 	}
@@ -651,7 +655,7 @@ func TestService_NilStoreErrors(t *testing.T) {
 	if _, err := svc.GetSession(ctx, "id"); err == nil {
 		t.Error("GetSession con store nil debió fallar")
 	}
-	if _, err := svc.Get(ctx, "id", MergeOptions{}); err == nil {
+	if _, err := svc.Get(ctx, "id"); err == nil {
 		t.Error("Get con store nil debió fallar")
 	}
 	if _, err := svc.Read(ctx, "id", false); err == nil {
