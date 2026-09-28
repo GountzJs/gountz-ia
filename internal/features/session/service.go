@@ -58,6 +58,7 @@ type Service interface {
 	LogEvent(ctx context.Context, evt *logger.Event) error
 	GetEvents(ctx context.Context, id string) ([]logger.Event, error)
 	WatchEvents(ctx context.Context, id string) (<-chan logger.Event, error)
+	Cleanup(ctx context.Context, id string) error
 	Prune(ctx context.Context) (*PruneResult, error)
 	Vault() vault.Service
 }
@@ -246,7 +247,6 @@ func (s *sessionService) StartChat(ctx context.Context, req StartChatRequest) er
 			}
 		}
 
-
 		if len(requiredKeys) > 0 {
 			if missing, err := s.vault.ValidateRequired(ctx, requiredKeys); err == nil && len(missing) > 0 {
 				fmt.Fprintf(os.Stderr, "\n\033[1;33m▲ Aviso de Entorno:\033[0m Se detectaron variables no configuradas en el entorno ni en el vault:\n")
@@ -276,11 +276,16 @@ func (s *sessionService) StartChat(ctx context.Context, req StartChatRequest) er
 		req.OnLaunch(id, isIsolated)
 	}
 
+	initPrompt := req.InitialPrompt
+	if initPrompt == "" {
+		initPrompt = DefaultOrchestratorPrompt
+	}
+
 	cfg := Config{
 		ID:              id,
 		Provider:        prov,
 		WorkingDir:      targetDir,
-		InitialPrompt:   req.InitialPrompt,
+		InitialPrompt:   initPrompt,
 		PermissionLevel: perm,
 		BinaryPath:      bin,
 		Profiles:        req.Profiles,
@@ -549,6 +554,32 @@ func (s *sessionService) WatchEvents(ctx context.Context, id string) (<-chan log
 	return s.logger.Watch(ctx, id)
 }
 
+func (s *sessionService) Cleanup(ctx context.Context, id string) error {
+	if s.store == nil {
+		return errors.New("store no inicializado")
+	}
+
+	record, err := s.store.Get(id)
+	if err != nil {
+		return err
+	}
+
+	targetDir := record.WorkingDir
+	if record.IsIsolated && record.WorktreeDir != "" {
+		targetDir = record.WorktreeDir
+	}
+
+	if s.tooling != nil {
+		if manifest, err := workspace.LoadManifest(s.workDir, id); err == nil && manifest != nil {
+			if err := s.tooling.Unproject(ctx, targetDir, manifest); err != nil {
+				return fmt.Errorf("error al desproyectar sesión '%s': %w", id, err)
+			}
+		}
+	}
+
+	return nil
+}
+
 func (s *sessionService) Prune(ctx context.Context) (*PruneResult, error) {
 	records, err := s.store.List()
 	if err != nil {
@@ -563,6 +594,17 @@ func (s *sessionService) Prune(ctx context.Context) (*PruneResult, error) {
 	report, err := s.workspace.Prune(ctx, s.workDir, activeIDs)
 	if err != nil {
 		return nil, fmt.Errorf("error al podar worktrees y ramas de Git: %w", err)
+	}
+
+	// Limpiar proyecciones huérfanas en sesiones terminadas no aisladas
+	if s.tooling != nil {
+		for _, rec := range records {
+			if !rec.IsIsolated && (rec.Status == StatusCompleted || rec.Status == StatusFailed || rec.Status == StatusKilled) {
+				if manifest, err := workspace.LoadManifest(s.workDir, rec.ID); err == nil && manifest != nil {
+					_ = s.tooling.Unproject(ctx, rec.WorkingDir, manifest)
+				}
+			}
+		}
 	}
 
 	return &PruneResult{

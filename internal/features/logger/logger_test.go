@@ -62,7 +62,7 @@ func TestSerializationStatusNullOKFailed(t *testing.T) {
 	}
 
 	// Verificar lectura directa del archivo para comprobar serialización JSON cruda
-	eventFile := filepath.Join(tempDir, ".harness", "sessions", sessionID+".events.jsonl")
+	eventFile := filepath.Join(tempDir, ".harness", "sessions", sessionID, "events.jsonl")
 	content, err := os.ReadFile(eventFile)
 	if err != nil {
 		t.Fatalf("No se pudo leer archivo de eventos: %v", err)
@@ -356,5 +356,34 @@ func TestValidationErrors(t *testing.T) {
 	badStatus := logger.Status("UNKNOWN")
 	if err := svc.Emit(ctx, &logger.Event{SessionID: "s1", Stage: logger.StageFinish, Status: &badStatus}); err == nil {
 		t.Errorf("Se esperaba error por status inválido")
+	}
+}
+
+func TestLegacyEventsReading(t *testing.T) {
+	tempDir := t.TempDir()
+	svc := logger.NewService(tempDir)
+	ctx := context.Background()
+	sessionID := "sess-legacy-events"
+
+	legacyDir := filepath.Join(tempDir, ".harness", "sessions")
+	if err := os.MkdirAll(legacyDir, 0755); err != nil {
+		t.Fatalf("error creando directorio legacy: %v", err)
+	}
+
+	legacyFile := filepath.Join(legacyDir, sessionID+".events.jsonl")
+	evtLine := `{"id":"evt-1","session_id":"` + sessionID + `","action":"Acción legacy","stage":"READ"}` + "\n"
+	if err := os.WriteFile(legacyFile, []byte(evtLine), 0644); err != nil {
+		t.Fatalf("error escribiendo archivo legacy: %v", err)
+	}
+
+	events, err := svc.GetEvents(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetEvents falló en fallback legacy: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("se esperaba 1 evento de archivo legacy, obtenidos %d", len(events))
+	}
+	if events[0].Action != "Acción legacy" || events[0].ID != "evt-1" {
+		t.Errorf("contenido inesperado de evento legacy: %+v", events[0])
 	}
 }

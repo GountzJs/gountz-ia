@@ -7,6 +7,7 @@ import (
 	"gz-ia/internal/features/tooling"
 	"gz-ia/internal/version"
 	"gz-ia/packages/orchy"
+	"gz-ia/packages/orchy/batteries/observability"
 	"gz-ia/packages/orchy/batteries/worktree"
 
 	"github.com/spf13/cobra"
@@ -55,10 +56,15 @@ Expone herramientas del microkernel (worktree_read y herramientas de toolkits) a
 				}
 			}
 
-			// 3. Registrar baterías de worktree
+			// 3. Registrar baterías nativas (worktree y observability)
 			worktreePlugin := worktree.NewWorktreePlugin(targetDir, worktree.WithAllowAgentGet(allowGet))
 			if err := kernel.Use(worktreePlugin); err != nil {
 				fmt.Fprintf(os.Stderr, "[gz-ia mcp] Advertencia al registrar batería worktree: %v\n", err)
+			}
+
+			obsPlugin := observability.NewObservabilityPlugin(resolvedWorkDir, observability.WithSessionID(sessionID))
+			if err := kernel.Use(obsPlugin); err != nil {
+				fmt.Fprintf(os.Stderr, "[gz-ia mcp] Advertencia al registrar batería observability: %v\n", err)
 			}
 
 			// 4. Registrar herramientas de Tooling si hay toolkits o perfiles

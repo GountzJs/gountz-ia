@@ -35,7 +35,7 @@ func HashBytes(data []byte) string {
 
 // ManifestPath retorna la ruta de persistencia del manifiesto fuera del worktree.
 func ManifestPath(baseDir string, sessionID string) string {
-	return filepath.Join(baseDir, ".harness", "sessions", sessionID+".manifest.json")
+	return filepath.Join(baseDir, ".harness", "sessions", sessionID, "manifest.json")
 }
 
 // SaveManifest persiste el manifiesto de la sesión atómicamente en disco.
@@ -44,7 +44,9 @@ func SaveManifest(baseDir string, m *Manifest) error {
 		return nil
 	}
 	p := ManifestPath(baseDir, m.SessionID)
-	_ = os.MkdirAll(filepath.Dir(p), 0755)
+	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
@@ -52,12 +54,22 @@ func SaveManifest(baseDir string, m *Manifest) error {
 	return os.WriteFile(p, data, 0644)
 }
 
-// LoadManifest carga el manifiesto de la sesión si existe.
+// LoadManifest carga el manifiesto de la sesión si existe, buscando primero
+// en .harness/sessions/<sessionID>/manifest.json y aplicando fallback a .harness/sessions/<sessionID>.manifest.json.
 func LoadManifest(baseDir string, sessionID string) (*Manifest, error) {
 	p := ManifestPath(baseDir, sessionID)
 	data, err := os.ReadFile(p)
 	if err != nil {
-		return nil, err
+		if os.IsNotExist(err) {
+			legacyPath := filepath.Join(baseDir, ".harness", "sessions", sessionID+".manifest.json")
+			legacyData, legacyErr := os.ReadFile(legacyPath)
+			if legacyErr != nil {
+				return nil, legacyErr
+			}
+			data = legacyData
+		} else {
+			return nil, err
+		}
 	}
 	var m Manifest
 	if err := json.Unmarshal(data, &m); err != nil {

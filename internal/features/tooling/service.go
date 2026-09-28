@@ -27,6 +27,7 @@ type Service interface {
 	ComposeToolkits(ctx context.Context, toolkitIDs []string) (*ComposedTooling, error)
 	RegisterToolsInKernel(ctx context.Context, kernel *orchy.Kernel, tooling *ComposedTooling, workDir string) error
 	ProjectIntoWorktree(ctx context.Context, targetDir string, composed *ComposedTooling, sessionID string, baseDir ...string) error
+	Unproject(ctx context.Context, targetDir string, manifest *workspace.Manifest) error
 	ToolingDir() string
 	ProjectDir() string
 
@@ -411,24 +412,31 @@ func (s *toolingService) ProjectIntoWorktree(ctx context.Context, targetDir stri
 		}
 	}
 
-	// 3. Proyectar directivas de toolkits individuales (ej. TOOLKIT_COMMON-AGENTS.md)
-	for targetFilename, srcPath := range composed.AgentsFiles {
-		dstPath := filepath.Join(targetDir, targetFilename)
-		if _, ok := manifest.OriginalFiles[targetFilename]; !ok {
-			if origBytes, err := os.ReadFile(dstPath); err == nil {
-				manifest.OriginalFiles[targetFilename] = string(origBytes)
-			} else {
-				manifest.CreatedFiles = append(manifest.CreatedFiles, targetFilename)
+	// 3. Proyectar directivas de toolkits individuales (ej. TOOLKIT_COMMON-AGENTS.md) dentro de .agents/toolkits/
+	if len(composed.AgentsFiles) > 0 {
+		toolkitsDir := filepath.Join(targetDir, ".agents", "toolkits")
+		if err := os.MkdirAll(toolkitsDir, 0755); err != nil {
+			return fmt.Errorf("error creando directorio de toolkits %s: %w", toolkitsDir, err)
+		}
+		for targetFilename, srcPath := range composed.AgentsFiles {
+			relPath := filepath.Join(".agents", "toolkits", targetFilename)
+			dstPath := filepath.Join(targetDir, relPath)
+			if _, ok := manifest.OriginalFiles[relPath]; !ok {
+				if origBytes, err := os.ReadFile(dstPath); err == nil {
+					manifest.OriginalFiles[relPath] = string(origBytes)
+				} else {
+					manifest.CreatedFiles = append(manifest.CreatedFiles, relPath)
+				}
 			}
+			if err := copyFile(srcPath, dstPath); err != nil {
+				return fmt.Errorf("error copiando directiva %s: %w", relPath, err)
+			}
+			data, err := os.ReadFile(dstPath)
+			if err != nil {
+				return fmt.Errorf("error leyendo directiva proyectada %s: %w", relPath, err)
+			}
+			manifest.ProjectedHash[relPath] = workspace.HashBytes(data)
 		}
-		if err := copyFile(srcPath, dstPath); err != nil {
-			return fmt.Errorf("error copiando directiva %s: %w", targetFilename, err)
-		}
-		data, err := os.ReadFile(dstPath)
-		if err != nil {
-			return fmt.Errorf("error leyendo directiva proyectada %s: %w", targetFilename, err)
-		}
-		manifest.ProjectedHash[targetFilename] = workspace.HashBytes(data)
 	}
 
 	// 4. Redactar el AGENTS.md maestro unificado preservando reglas previas del proyecto si existían
@@ -575,6 +583,43 @@ func (s *toolingService) ProjectIntoWorktree(ctx context.Context, targetDir stri
 	return nil
 }
 
+// Unproject remueve limpiamente los archivos listados en manifest.CreatedFiles,
+// restaura los contenidos previos de manifest.OriginalFiles y limpia directorios vacíos creados.
+func (s *toolingService) Unproject(ctx context.Context, targetDir string, manifest *workspace.Manifest) error {
+	if manifest == nil || targetDir == "" {
+		return nil
+	}
+
+	// 1. Remover archivos creados por gz-ia durante la proyección
+	for _, relPath := range manifest.CreatedFiles {
+		fullPath := filepath.Join(targetDir, relPath)
+		_ = os.RemoveAll(fullPath)
+	}
+
+	// 2. Restaurar archivos originales previos a la sesión
+	for relPath, origContent := range manifest.OriginalFiles {
+		fullPath := filepath.Join(targetDir, relPath)
+		_ = os.MkdirAll(filepath.Dir(fullPath), 0755)
+		_ = os.WriteFile(fullPath, []byte(origContent), 0644)
+	}
+
+	// 3. Limpiar directorios vacíos en orden de profundidad
+	cleanDirs := []string{
+		filepath.Join(targetDir, ".agents", "toolkits"),
+		filepath.Join(targetDir, ".agents", "skills"),
+		filepath.Join(targetDir, ".agents", "rules"),
+		filepath.Join(targetDir, ".agents"),
+	}
+	for _, d := range cleanDirs {
+		entries, err := os.ReadDir(d)
+		if err == nil && len(entries) == 0 {
+			_ = os.Remove(d)
+		}
+	}
+
+	return nil
+}
+
 func generateMasterAgentsMarkdown(composed *ComposedTooling, sessionID string) string {
 	var sb strings.Builder
 
@@ -585,7 +630,8 @@ func generateMasterAgentsMarkdown(composed *ComposedTooling, sessionID string) s
 		sb.WriteString("## Directivas de Dominio y Toolkits\n")
 		sb.WriteString("Esta sesión integra los siguientes paquetes de directivas. Consulta y acata las guías de cada archivo:\n\n")
 		for filename := range composed.AgentsFiles {
-			sb.WriteString(fmt.Sprintf("- [%s](%s)\n", filename, filename))
+			relPath := filepath.Join(".agents", "toolkits", filename)
+			sb.WriteString(fmt.Sprintf("- [%s](%s)\n", filename, relPath))
 		}
 		sb.WriteString("\n")
 	}
@@ -598,8 +644,10 @@ func generateMasterAgentsMarkdown(composed *ComposedTooling, sessionID string) s
 		sb.WriteString("\n")
 	}
 
+	sb.WriteString("## Herramientas MCP Disponibles (vía Microkernel Orchy)\n")
+	sb.WriteString("- **`session_log`**: Registra eventos de observabilidad, hitos y transiciones de etapas (READ, PENDING, FINISH) en el log de la sesión.\n")
+	sb.WriteString("- **`worktree_read`**: Inspecciona el contenido y diff actual de un worktree de sesión de gz-ia sin alterar el workspace base.\n")
 	if len(composed.Tools) > 0 {
-		sb.WriteString("## Herramientas MCP Disponibles (vía Microkernel Orchy)\n")
 		for _, t := range composed.Tools {
 			desc := t.Description
 			if desc == "" {
@@ -607,8 +655,8 @@ func generateMasterAgentsMarkdown(composed *ComposedTooling, sessionID string) s
 			}
 			sb.WriteString(fmt.Sprintf("- **`%s`**: %s\n", t.Name, desc))
 		}
-		sb.WriteString("\n")
 	}
+	sb.WriteString("\n")
 
 	return sb.String()
 }

@@ -32,9 +32,9 @@ func NewFileStore(baseDir string) *FileStore {
 	}
 }
 
-// EventFilePath retorna la ruta completa del archivo .events.jsonl para una sesión dada.
+// EventFilePath retorna la ruta completa del archivo events.jsonl para una sesión dada.
 func (f *FileStore) EventFilePath(sessionID string) string {
-	return filepath.Join(f.baseDir, sessionID+".events.jsonl")
+	return filepath.Join(f.baseDir, sessionID, "events.jsonl")
 }
 
 // Append persiste de forma segura y concurrente un evento al final del archivo de eventos de la sesión.
@@ -69,11 +69,11 @@ func (f *FileStore) Append(sessionID string, evt *Event) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if err := os.MkdirAll(f.baseDir, 0755); err != nil {
+	filePath := f.EventFilePath(sessionID)
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
 		return fmt.Errorf("error al crear directorio base de eventos: %w", err)
 	}
 
-	filePath := f.EventFilePath(sessionID)
 	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("error al abrir archivo de eventos: %w", err)
@@ -100,9 +100,18 @@ func (f *FileStore) ReadEvents(sessionID string) ([]Event, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return []Event{}, nil
+			legacyPath := filepath.Join(f.baseDir, sessionID+".events.jsonl")
+			legacyFile, legacyErr := os.Open(legacyPath)
+			if legacyErr != nil {
+				if os.IsNotExist(legacyErr) {
+					return []Event{}, nil
+				}
+				return nil, fmt.Errorf("error al abrir archivo de eventos: %w", legacyErr)
+			}
+			file = legacyFile
+		} else {
+			return nil, fmt.Errorf("error al abrir archivo de eventos: %w", err)
 		}
-		return nil, fmt.Errorf("error al abrir archivo de eventos: %w", err)
 	}
 	defer file.Close()
 

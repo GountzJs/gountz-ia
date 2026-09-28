@@ -390,6 +390,10 @@ func (m *mockTUISessionService) Get(ctx context.Context, id string, opts session
 	return &workspace.MergeResult{AlreadyUpToDate: true}, nil
 }
 
+func (m *mockTUISessionService) Cleanup(ctx context.Context, id string) error {
+	return nil
+}
+
 func (m *mockTUISessionService) Prune(ctx context.Context) (*session.PruneResult, error) {
 	return &session.PruneResult{}, nil
 }

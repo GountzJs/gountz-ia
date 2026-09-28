@@ -45,11 +45,16 @@ func newChatCmd() *cobra.Command {
 			allTooling = append(allTooling, profiles...)
 			allTooling = append(allTooling, toolkits...)
 
+			initialPrompt := prompt
+			if initialPrompt == "" {
+				initialPrompt = session.DefaultOrchestratorPrompt
+			}
+
 			svc := getSessionService(workDir)
 			req := session.StartChatRequest{
 				Provider:        drv.ID(),
 				WorkingDir:      workDir,
-				InitialPrompt:   prompt,
+				InitialPrompt:   initialPrompt,
 				PermissionLevel: session.PermissionLevel(perm),
 				BinaryPath:      drv.BinaryName(),
 				Profiles:        allTooling,

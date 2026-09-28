@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1027,5 +1028,120 @@ func TestService_Vault_Integration(t *testing.T) {
 	}
 	if !foundSecret {
 		t.Errorf("La variable MY_CUSTOM_SECRET no fue inyectada en el runner")
+	}
+}
+
+func TestService_StartChat_DefaultOrchestratorPrompt(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+	runner := &mockServiceRunner{}
+	ctx := context.Background()
+
+	svc := NewService(tmpDir, WithStore(store), WithRunner(runner))
+
+	// Iniciar chat sin InitialPrompt
+	req := StartChatRequest{
+		ID:         "prompt_sess_1",
+		Provider:   "agy",
+		WorkingDir: tmpDir,
+	}
+
+	err := svc.StartChat(ctx, req)
+	if err != nil {
+		t.Fatalf("StartChat falló: %v", err)
+	}
+
+	rec, err := store.Get("prompt_sess_1")
+	if err != nil {
+		t.Fatalf("Get falló: %v", err)
+	}
+
+	if rec.InitialPrompt != DefaultOrchestratorPrompt {
+		t.Errorf("InitialPrompt esperado '%s', obtenido '%s'", DefaultOrchestratorPrompt, rec.InitialPrompt)
+	}
+
+	// Comprobar que en los args pasados al runner está el DefaultOrchestratorPrompt
+	hasPromptArg := false
+	for i, arg := range runner.lastArgs {
+		if arg == "-i" && i+1 < len(runner.lastArgs) && runner.lastArgs[i+1] == DefaultOrchestratorPrompt {
+			hasPromptArg = true
+			break
+		}
+	}
+	if !hasPromptArg {
+		t.Errorf("No se pasó DefaultOrchestratorPrompt al runner: %v", runner.lastArgs)
+	}
+}
+
+func TestService_Cleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+	ctx := context.Background()
+
+	sessID := "cleanup_test_sess"
+	createdRel := "created_by_gz_ia.txt"
+	createdPath := filepath.Join(tmpDir, createdRel)
+	_ = os.WriteFile(createdPath, []byte("temporary projected content"), 0644)
+
+	manifest := workspace.NewManifest(sessID)
+	manifest.CreatedFiles = []string{createdRel}
+	if err := workspace.SaveManifest(tmpDir, manifest); err != nil {
+		t.Fatalf("SaveManifest falló: %v", err)
+	}
+
+	rec := &SessionRecord{
+		ID:         sessID,
+		Status:     StatusCompleted,
+		WorkingDir: tmpDir,
+		IsIsolated: false,
+	}
+	_ = store.Save(rec)
+
+	svc := NewService(tmpDir, WithStore(store))
+	err := svc.Cleanup(ctx, sessID)
+	if err != nil {
+		t.Fatalf("Cleanup falló: %v", err)
+	}
+
+	if _, err := os.Stat(createdPath); !os.IsNotExist(err) {
+		t.Errorf("El archivo %s debió ser eliminado por Cleanup", createdPath)
+	}
+}
+
+func TestService_Prune_UnprojectsTerminatedSessions(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+	ctx := context.Background()
+
+	sessID := "prune_cleanup_sess"
+	createdRel := "orphaned_proj_file.txt"
+	createdPath := filepath.Join(tmpDir, createdRel)
+	_ = os.WriteFile(createdPath, []byte("residual content"), 0644)
+
+	manifest := workspace.NewManifest(sessID)
+	manifest.CreatedFiles = []string{createdRel}
+	if err := workspace.SaveManifest(tmpDir, manifest); err != nil {
+		t.Fatalf("SaveManifest falló: %v", err)
+	}
+
+	rec := &SessionRecord{
+		ID:         sessID,
+		Status:     StatusCompleted,
+		WorkingDir: tmpDir,
+		IsIsolated: false,
+	}
+	_ = store.Save(rec)
+
+	svc := NewService(tmpDir, WithStore(store))
+	res, err := svc.Prune(ctx)
+	if err != nil {
+		t.Fatalf("Prune falló: %v", err)
+	}
+	if res == nil {
+		t.Fatal("Prune retornó nil")
+	}
+
+	if _, err := os.Stat(createdPath); !os.IsNotExist(err) {
+		t.Errorf("El archivo %s debió ser desproyectado durante Prune", createdPath)
 	}
 }

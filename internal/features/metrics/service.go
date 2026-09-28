@@ -36,6 +36,7 @@ func NewService(opts ...Option) Service {
 }
 
 // readSessionMetadata intenta leer el registro de sesión local de .harness/sessions/.
+// Busca primero en .harness/sessions/<id>/session.json y aplica fallback a .harness/sessions/<id>.json.
 func readSessionMetadata(workDir, sessionID string) *sessionMetadata {
 	if sessionID == "" {
 		return nil
@@ -50,8 +51,12 @@ func readSessionMetadata(workDir, sessionID string) *sessionMetadata {
 		if dir == "" {
 			continue
 		}
-		path := filepath.Join(dir, ".harness", "sessions", sessionID+".json")
+		path := filepath.Join(dir, ".harness", "sessions", sessionID, "session.json")
 		data, err := os.ReadFile(path)
+		if err != nil && os.IsNotExist(err) {
+			path = filepath.Join(dir, ".harness", "sessions", sessionID+".json")
+			data, err = os.ReadFile(path)
+		}
 		if err == nil {
 			var meta sessionMetadata
 			if json.Unmarshal(data, &meta) == nil {

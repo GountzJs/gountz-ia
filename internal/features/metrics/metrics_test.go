@@ -468,3 +468,70 @@ func TestCollector_Errors(t *testing.T) {
 		t.Errorf("se esperaba error con conversationID vacío")
 	}
 }
+
+func TestMetricsService_DirectorySessionMetadata(t *testing.T) {
+	tempDir := t.TempDir()
+	brainDir := filepath.Join(tempDir, "brain")
+	workDir := filepath.Join(tempDir, "workspace")
+	historyPath := filepath.Join(tempDir, "history.jsonl")
+
+	sessID := "sess-dir-meta"
+	convID := "conv-dir-meta"
+
+	// Guardar metadata en la nueva estructura de directorio: .harness/sessions/<id>/session.json
+	sessDir := filepath.Join(workDir, ".harness", "sessions", sessID)
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now().Add(-2 * time.Minute)
+	finished := time.Now()
+	metaJSON := fmt.Sprintf(`{
+		"id": "%s",
+		"working_dir": "%s",
+		"worktree_dir": "%s/isolated",
+		"started_at": "%s",
+		"finished_at": "%s",
+		"duration_ms": 120000
+	}`, sessID, workDir, workDir, started.Format(time.RFC3339), finished.Format(time.RFC3339))
+
+	if err := os.WriteFile(filepath.Join(sessDir, "session.json"), []byte(metaJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	histEntry := fmt.Sprintf(`{"display":"inicio","timestamp":%d,"workspace":"%s/isolated","conversationId":"%s"}`+"\n",
+		started.UnixMilli(), workDir, convID)
+	if err := os.WriteFile(historyPath, []byte(histEntry), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tDir := filepath.Join(brainDir, convID, ".system_generated", "logs")
+	if err := os.MkdirAll(tDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	tContent := fmt.Sprintf(`{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"%s","content":"Hola"}
+`, started.Format(time.RFC3339))
+	if err := os.WriteFile(filepath.Join(tDir, "transcript.jsonl"), []byte(tContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewService(
+		WithBrainDir(brainDir),
+		WithHistoryPath(historyPath),
+	)
+
+	ctx := context.Background()
+	res, err := svc.GetMetrics(ctx, sessID, workDir)
+	if err != nil {
+		t.Fatalf("GetMetrics falló: %v", err)
+	}
+
+	if res.SessionID != sessID {
+		t.Errorf("SessionID esperado '%s', obtenido '%s'", sessID, res.SessionID)
+	}
+	if res.ConversationID != convID {
+		t.Errorf("ConversationID esperado '%s', obtenido '%s'", convID, res.ConversationID)
+	}
+	if res.TotalDuration != 120*time.Second {
+		t.Errorf("TotalDuration esperado 120s, obtenido %v", res.TotalDuration)
+	}
+}

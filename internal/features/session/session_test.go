@@ -500,7 +500,9 @@ type mockToolingService struct {
 	composeToolkitsFunc func(ctx context.Context, ids []string) (*tooling.ComposedTooling, error)
 	getPresetFunc       func(ctx context.Context, name string) (*tooling.Preset, error)
 	projectWorktreeFunc func(ctx context.Context, targetDir string, composed *tooling.ComposedTooling, sessionID string, baseDir ...string) error
+	unprojectFunc       func(ctx context.Context, targetDir string, manifest *workspace.Manifest) error
 	projectCalled       bool
+	unprojectCalled     bool
 }
 
 func (m *mockToolingService) ResolveToolkits(ctx context.Context, names []string) ([]string, error) {
@@ -536,6 +538,14 @@ func (m *mockToolingService) ProjectIntoWorktree(ctx context.Context, targetDir 
 	m.projectCalled = true
 	if m.projectWorktreeFunc != nil {
 		return m.projectWorktreeFunc(ctx, targetDir, composed, sessionID, baseDir...)
+	}
+	return nil
+}
+
+func (m *mockToolingService) Unproject(ctx context.Context, targetDir string, manifest *workspace.Manifest) error {
+	m.unprojectCalled = true
+	if m.unprojectFunc != nil {
+		return m.unprojectFunc(ctx, targetDir, manifest)
 	}
 	return nil
 }
@@ -647,5 +657,50 @@ func TestSessionStart_ToolkitPresetCollisions(t *testing.T) {
 	err = sessMCP.Start(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "colisión de servidores MCP") {
 		t.Errorf("se esperaba error de colisión de servidores MCP, obtenido: %v", err)
+	}
+}
+
+func TestSessionStart_NonIsolatedUnprojectsOnExit(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+	mockRun := &mockRunner{}
+	sessID := "non_isolated_cleanup"
+
+	// Crear manifest para la sesión
+	manifest := workspace.NewManifest(sessID)
+	manifest.CreatedFiles = []string{".agents/toolkits/TOOLKIT_A-AGENTS.md"}
+	if err := workspace.SaveManifest(tmpDir, manifest); err != nil {
+		t.Fatalf("SaveManifest falló: %v", err)
+	}
+
+	toolingMock := &mockToolingService{}
+
+	// Mock workspace no aislado
+	mockWS := &mockWorkspaceProvider{
+		isGitAvail: false,
+		prepareWS: &workspace.Workspace{
+			WorkingDir: tmpDir,
+			TargetDir:  tmpDir,
+			IsIsolated: false,
+		},
+	}
+
+	cfg := Config{
+		ID:         sessID,
+		WorkingDir: tmpDir,
+		Profiles:   []string{"base-profile"},
+	}
+
+	sess := New(cfg, mockRun, store).
+		WithWorkspace(mockWS).
+		WithTooling(toolingMock)
+
+	err := sess.Start(context.Background())
+	if err != nil {
+		t.Fatalf("Start() falló: %v", err)
+	}
+
+	if !toolingMock.unprojectCalled {
+		t.Errorf("Unproject debió ser llamado automáticamente al finalizar la sesión no aislada")
 	}
 }

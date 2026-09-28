@@ -59,8 +59,8 @@ func newSessionCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:          "session",
-		Short:        "Gestiona sesiones agénticas locales (list, kill, resume, delete, show, diff, merge, read, get, path)",
-		Long:         `Permite listar, inspeccionar, reanudar, eliminar, comparar, fusionar u obtener la ruta de sesiones registradas en el proyecto actual.`,
+		Short:        "Gestiona sesiones agénticas locales (list, kill, resume, delete, show, diff, merge, read, get, path, cleanup, prune)",
+		Long:         `Permite listar, inspeccionar, reanudar, eliminar, comparar, fusionar, limpiar u obtener la ruta de sesiones registradas en el proyecto actual.`,
 		SilenceUsage: true,
 	}
 
@@ -765,6 +765,28 @@ Semántica de integración:
 	}
 	pruneCmd.Flags().StringVarP(&workDir, "dir", "d", "", "Directorio de trabajo")
 
+	// Subcomando cleanup
+	cleanupCmd := &cobra.Command{
+		Use:   "cleanup <id>",
+		Short: "Limpia y desproyecta archivos agénticos de una sesión en el espacio de trabajo",
+		Long:  `Remueve de forma limpia los archivos proyectados por una sesión no aislada y restaura los archivos originales previos a la sesión.`,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			id := args[0]
+			workDir = resolveWorkDir(c.Context(), workDir)
+			svc := getSessionService(workDir)
+			if err := svc.Cleanup(c.Context(), id); err != nil {
+				return err
+			}
+
+			icons := tui.GetIcons()
+			msg := lipgloss.NewStyle().Foreground(tui.ColorSuccess).Bold(true).
+				Render(fmt.Sprintf("%s Espacio de trabajo limpiado y desproyectado con éxito para la sesión '%s'.", icons.Check, id))
+			fmt.Fprintln(c.OutOrStdout(), msg)
+			return nil
+		},
+	}
+
 	cmd.AddCommand(listCmd)
 	cmd.AddCommand(killCmd)
 	cmd.AddCommand(resumeCmd)
@@ -778,6 +800,7 @@ Semántica de integración:
 	cmd.AddCommand(metricsCmd)
 	cmd.AddCommand(logCmd)
 	cmd.AddCommand(logsCmd)
+	cmd.AddCommand(cleanupCmd)
 	cmd.AddCommand(pruneCmd)
 
 	return cmd

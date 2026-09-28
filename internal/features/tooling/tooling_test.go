@@ -264,6 +264,21 @@ func TestToolingService_ComposeAndProject(t *testing.T) {
 	if !strings.Contains(masterContent, "TOOLKIT_A-AGENTS.md") || !strings.Contains(masterContent, "TOOLKIT_B-AGENTS.md") {
 		t.Errorf("AGENTS.md maestro incompleto: %s", masterContent)
 	}
+	// Validar que las directivas de toolkits se guardaron dentro de .agents/toolkits/ y NUNCA en la raíz
+	if _, err := os.Stat(filepath.Join(targetWorktreeDir, ".agents", "toolkits", "TOOLKIT_A-AGENTS.md")); os.IsNotExist(err) {
+		t.Errorf("TOOLKIT_A-AGENTS.md debió proyectarse en .agents/toolkits/ y no fue encontrado")
+	}
+	if _, err := os.Stat(filepath.Join(targetWorktreeDir, "TOOLKIT_A-AGENTS.md")); !os.IsNotExist(err) {
+		t.Errorf("TOOLKIT_A-AGENTS.md NO debe escribirse suelto en la raíz del proyecto")
+	}
+	if !strings.Contains(masterContent, ".agents/toolkits/TOOLKIT_A-AGENTS.md") {
+		t.Errorf("Enlace a TOOLKIT_A-AGENTS.md en masterContent no apunta a .agents/toolkits/: %s", masterContent)
+	}
+
+	// Validar que las herramientas MCP estándar como session_log y worktree_read están documentadas
+	if !strings.Contains(masterContent, "session_log") || !strings.Contains(masterContent, "worktree_read") {
+		t.Errorf("masterContent no documenta session_log ni worktree_read: %s", masterContent)
+	}
 
 	// Validar que las reglas fueron proyectadas en .agents/rules/
 	ruleAPath := filepath.Join(targetWorktreeDir, ".agents", "rules", "rule-a.md")
@@ -674,5 +689,82 @@ func TestToolingService_ProjectIntoWorktree_PreservesOriginalFilesOnReProject(t 
 	// Validar que m2 aún conserva fielmente el originalAgents del repo y no el AGENTS.md ya proyectado
 	if m2.OriginalFiles["AGENTS.md"] != originalAgents {
 		t.Fatalf("OriginalFiles['AGENTS.md'] fue corrompido con el contenido proyectado!\nEsperado: %q\nObtenido: %q", originalAgents, m2.OriginalFiles["AGENTS.md"])
+	}
+}
+
+func TestToolingService_Unproject(t *testing.T) {
+	tempToolingDir := t.TempDir()
+	tkDir := filepath.Join(tempToolingDir, "toolkits", "toolkit-clean")
+	_ = os.MkdirAll(filepath.Join(tkDir, "rules"), 0755)
+	_ = os.MkdirAll(filepath.Join(tkDir, "skills", "clean-skill"), 0755)
+	_ = os.WriteFile(filepath.Join(tkDir, "AGENTS.md"), []byte("# Clean TK\n"), 0644)
+	_ = os.WriteFile(filepath.Join(tkDir, "rules", "clean-rule.md"), []byte("# Rule\n"), 0644)
+	_ = os.WriteFile(filepath.Join(tkDir, "skills", "clean-skill", "SKILL.md"), []byte("# Skill\n"), 0644)
+
+	svc := NewService(tempToolingDir, "")
+	ctx := context.Background()
+
+	composed, err := svc.ComposeToolkits(ctx, []string{"toolkit-clean"})
+	if err != nil {
+		t.Fatalf("ComposeToolkits falló: %v", err)
+	}
+
+	targetDir := t.TempDir()
+	baseDir := t.TempDir()
+
+	// Pre-existente en el workspace del usuario: AGENTS.md y un archivo de código
+	originalAgents := "# Repo Pre-existente\n"
+	_ = os.WriteFile(filepath.Join(targetDir, "AGENTS.md"), []byte(originalAgents), 0644)
+	_ = os.WriteFile(filepath.Join(targetDir, "main.go"), []byte("package main\n"), 0644)
+
+	sessID := "test_unproject_sess"
+
+	// 1. Proyectar
+	err = svc.ProjectIntoWorktree(ctx, targetDir, composed, sessID, baseDir)
+	if err != nil {
+		t.Fatalf("ProjectIntoWorktree falló: %v", err)
+	}
+
+	// Comprobar que existen los archivos proyectados
+	if _, err := os.Stat(filepath.Join(targetDir, ".agents", "toolkits", "TOOLKIT_CLEAN-AGENTS.md")); err != nil {
+		t.Fatalf("TOOLKIT_CLEAN-AGENTS.md no fue proyectado: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, ".mcp.json")); err != nil {
+		t.Fatalf(".mcp.json no fue proyectado: %v", err)
+	}
+
+	manifest, err := workspace.LoadManifest(baseDir, sessID)
+	if err != nil {
+		t.Fatalf("LoadManifest falló: %v", err)
+	}
+
+	// 2. Desproyectar (Unproject)
+	err = svc.Unproject(ctx, targetDir, manifest)
+	if err != nil {
+		t.Fatalf("Unproject falló: %v", err)
+	}
+
+	// 3. Comprobar que .agents fue limpiado por completo
+	if _, err := os.Stat(filepath.Join(targetDir, ".agents")); !os.IsNotExist(err) {
+		t.Errorf("Directorio .agents debió ser removido por Unproject si quedó vacío")
+	}
+
+	// 4. Comprobar que .mcp.json creado por gz-ia fue removido
+	if _, err := os.Stat(filepath.Join(targetDir, ".mcp.json")); !os.IsNotExist(err) {
+		t.Errorf(".mcp.json debió ser removido por Unproject ya que no existía antes")
+	}
+
+	// 5. Comprobar que AGENTS.md fue restaurado fielmente a su contenido original
+	restoredAgentsBytes, err := os.ReadFile(filepath.Join(targetDir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("AGENTS.md debió persistir restaurado: %v", err)
+	}
+	if string(restoredAgentsBytes) != originalAgents {
+		t.Errorf("AGENTS.md no fue restaurado correctamente: esperado %q, obtenido %q", originalAgents, string(restoredAgentsBytes))
+	}
+
+	// 6. Archivo no relacionado no fue tocado
+	if mainBytes, err := os.ReadFile(filepath.Join(targetDir, "main.go")); err != nil || string(mainBytes) != "package main\n" {
+		t.Errorf("main.go fue alterado o borrado inesperadamente")
 	}
 }

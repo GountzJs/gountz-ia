@@ -28,6 +28,10 @@ const (
 	PermissionAutonomous PermissionLevel = "autonomous"
 )
 
+// DefaultOrchestratorPrompt define el prompt inicial por defecto para iniciar de forma proactiva
+// el rol de Agente Orquestador cuando el usuario no suministra un prompt inicial.
+const DefaultOrchestratorPrompt = "Inicia como Agente Orquestador de gz-ia para esta sesión. Saluda al usuario, reporta brevemente el estado del workspace y las directivas detectadas, y queda a su disposición para coordinar el trabajo."
+
 // Config contiene los parámetros para iniciar una sesión de chat con el agente.
 type Config struct {
 	ID              string
@@ -317,6 +321,15 @@ func (s *Session) Start(ctx context.Context) error {
 				}
 			}
 		}
+	}
+
+	// Si la sesión no es aislada (sin Git worktree), garantizar desproyección limpia al finalizar
+	if !ws.IsIsolated && s.Tooling != nil {
+		defer func() {
+			if manifest, err := workspace.LoadManifest(ws.WorkingDir, s.Config.ID); err == nil && manifest != nil {
+				_ = s.Tooling.Unproject(context.Background(), ws.TargetDir, manifest)
+			}
+		}()
 	}
 
 	startTime := time.Now()

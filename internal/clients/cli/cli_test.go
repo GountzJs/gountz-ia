@@ -239,12 +239,14 @@ func TestChatCmd_AutonomousPermission(t *testing.T) {
 		t.Fatalf("chatCmd autonomous falló: %v", err)
 	}
 
-	expectedArgs := []string{"--dangerously-skip-permissions"}
+	expectedArgs := []string{"--dangerously-skip-permissions", "-i", session.DefaultOrchestratorPrompt}
 	if len(mock.lastArgs) != len(expectedArgs) {
 		t.Fatalf("cantidad de argumentos inesperada: %v", mock.lastArgs)
 	}
-	if mock.lastArgs[0] != "--dangerously-skip-permissions" {
-		t.Errorf("esperado '--dangerously-skip-permissions', obtenido '%s'", mock.lastArgs[0])
+	for i, arg := range expectedArgs {
+		if mock.lastArgs[i] != arg {
+			t.Errorf("arg[%d]: esperado '%s', obtenido '%s'", i, arg, mock.lastArgs[i])
+		}
 	}
 }
 
@@ -2194,6 +2196,50 @@ func TestSessionCmd_Prune(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "sincronizado") && !strings.Contains(out, "Reconciliación") {
 		t.Errorf("salida inesperada de session prune: %s", out)
+	}
+}
+
+func TestSessionCmd_Cleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Crear sesión y manifest
+	store := session.NewFileStore(tmpDir)
+	sessID := "sess_cli_cleanup"
+	createdRel := "temp_unproject_file.txt"
+	createdPath := filepath.Join(tmpDir, createdRel)
+	_ = os.WriteFile(createdPath, []byte("temp"), 0644)
+
+	manifest := workspace.NewManifest(sessID)
+	manifest.CreatedFiles = []string{createdRel}
+	_ = workspace.SaveManifest(tmpDir, manifest)
+
+	_ = store.Save(&session.SessionRecord{
+		ID:         sessID,
+		Status:     session.StatusCompleted,
+		WorkingDir: tmpDir,
+	})
+
+	oldStore := defaultSessionStore
+	defaultSessionStore = store
+	defer func() { defaultSessionStore = oldStore }()
+
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"session", "cleanup", sessID, "--dir", tmpDir})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("session cleanup falló: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "limpiado y desproyectado con éxito") {
+		t.Errorf("salida inesperada de session cleanup: %s", out)
+	}
+
+	if _, err := os.Stat(createdPath); !os.IsNotExist(err) {
+		t.Errorf("archivo %s debió haber sido eliminado por session cleanup", createdPath)
 	}
 }
 
