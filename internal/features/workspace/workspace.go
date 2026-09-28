@@ -463,8 +463,8 @@ func (p *GitProvider) DiffWorktree(ctx context.Context, baseDir string, worktree
 				return "", fmt.Errorf("error al obtener diff en worktree: %w", tErr)
 			}
 
-			// Detectar archivos untracked usando git status --porcelain sin alterar el índice de git
-			statusOut, sErr := p.git.Run(ctx, worktreeDir, "status", "--porcelain")
+			// Detectar archivos untracked usando git status --porcelain -uall sin alterar el índice de git
+			statusOut, sErr := p.git.Run(ctx, worktreeDir, "status", "--porcelain", "-uall")
 			if sErr != nil {
 				return "", fmt.Errorf("error al obtener status en worktree: %w", sErr)
 			}
@@ -481,7 +481,12 @@ func (p *GitProvider) DiffWorktree(ctx context.Context, baseDir string, worktree
 				if strings.HasPrefix(line, "?? ") {
 					f := strings.TrimSpace(line[3:])
 					f = strings.Trim(f, "\"")
-					if f == "" {
+					if f == "" || strings.HasSuffix(f, "/") {
+						continue
+					}
+					// Si es un directorio físico en disco, omitir para no romper diff --no-index
+					fullPath := filepath.Join(worktreeDir, f)
+					if fi, err := os.Stat(fullPath); err == nil && fi.IsDir() {
 						continue
 					}
 					if manifest != nil {
@@ -521,8 +526,9 @@ func (p *GitProvider) DiffWorktree(ctx context.Context, baseDir string, worktree
 						uArgs = []string{"diff", "--no-index", "--", "/dev/null", f}
 					}
 					uDiff, _ := p.git.Run(ctx, worktreeDir, uArgs...)
-					if strings.TrimSpace(uDiff) != "" {
-						untrackedDiffs = append(untrackedDiffs, strings.TrimSpace(uDiff))
+					trimmedDiff := strings.TrimSpace(uDiff)
+					if trimmedDiff != "" && !strings.HasPrefix(trimmedDiff, "error:") && !strings.Contains(trimmedDiff, "Could not access") {
+						untrackedDiffs = append(untrackedDiffs, trimmedDiff)
 					}
 				}
 			}
@@ -639,13 +645,15 @@ func (p *GitProvider) MergeWorktree(ctx context.Context, sessionID string, baseD
 					return nil, fmt.Errorf("error al preparar cambios en worktree: %w", err)
 				}
 				commitMsg := fmt.Sprintf("chore(harness): session %s changes", sessionID)
-				if _, err := p.git.Run(ctx, worktreeDir, "commit", "--no-verify", "-m", commitMsg); err != nil {
+				cOut, err := p.git.Run(ctx, worktreeDir, "commit", "--no-verify", "-m", commitMsg)
+				if err != nil {
 					// Fallback si falta git config de usuario
-					if strings.Contains(err.Error(), "user.name") || strings.Contains(err.Error(), "tell me who you are") {
-						_, err = p.git.Run(ctx, worktreeDir, "-c", "user.name=gz-ia", "-c", "user.email=gz-ia@localhost", "commit", "--no-verify", "-m", commitMsg)
+					combined := err.Error() + " " + cOut
+					if strings.Contains(combined, "user.name") || strings.Contains(combined, "tell me who you are") {
+						cOut, err = p.git.Run(ctx, worktreeDir, "-c", "user.name=gz-ia", "-c", "user.email=gz-ia@localhost", "commit", "--no-verify", "-m", commitMsg)
 					}
 					if err != nil {
-						return nil, fmt.Errorf("error al comitear cambios en worktree: %w", err)
+						return nil, fmt.Errorf("error al comitear cambios en worktree: %w (%s)", err, cOut)
 					}
 				}
 			}
@@ -679,8 +687,11 @@ func (p *GitProvider) MergeWorktree(ctx context.Context, sessionID string, baseD
 			if strings.TrimSpace(st) != "" {
 				commitMsg := fmt.Sprintf("chore(harness): merge session %s changes (squash)", sessionID)
 				cOut, cErr := p.git.Run(ctx, baseDir, "commit", "--no-verify", "-m", commitMsg)
-				if cErr != nil && (strings.Contains(cErr.Error(), "user.name") || strings.Contains(cErr.Error(), "tell me who you are")) {
-					cOut, cErr = p.git.Run(ctx, baseDir, "-c", "user.name=gz-ia", "-c", "user.email=gz-ia@localhost", "commit", "--no-verify", "-m", commitMsg)
+				if cErr != nil {
+					combined := cErr.Error() + " " + cOut
+					if strings.Contains(combined, "user.name") || strings.Contains(combined, "tell me who you are") {
+						cOut, cErr = p.git.Run(ctx, baseDir, "-c", "user.name=gz-ia", "-c", "user.email=gz-ia@localhost", "commit", "--no-verify", "-m", commitMsg)
+					}
 				}
 				if cErr != nil {
 					return nil, fmt.Errorf("error al comitear squash merge: %w (%s)", cErr, cOut)
@@ -701,6 +712,15 @@ func (p *GitProvider) MergeWorktree(ctx context.Context, sessionID string, baseD
 		mergeOut, mergeErr = p.git.Run(ctx, baseDir, "merge", "--no-verify", branchName, "-m", commitMsg)
 		if mergeErr != nil && strings.Contains(mergeErr.Error(), "unknown option") {
 			mergeOut, mergeErr = p.git.Run(ctx, baseDir, "merge", branchName, "-m", commitMsg)
+		}
+		if mergeErr != nil {
+			combined := mergeErr.Error() + " " + mergeOut
+			if strings.Contains(combined, "user.name") || strings.Contains(combined, "tell me who you are") {
+				mergeOut, mergeErr = p.git.Run(ctx, baseDir, "-c", "user.name=gz-ia", "-c", "user.email=gz-ia@localhost", "merge", "--no-verify", branchName, "-m", commitMsg)
+				if mergeErr != nil && strings.Contains(mergeErr.Error(), "unknown option") {
+					mergeOut, mergeErr = p.git.Run(ctx, baseDir, "-c", "user.name=gz-ia", "-c", "user.email=gz-ia@localhost", "merge", branchName, "-m", commitMsg)
+				}
+			}
 		}
 		if mergeErr != nil {
 			if strings.Contains(strings.ToLower(mergeOut), "conflict") {

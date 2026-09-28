@@ -124,3 +124,41 @@ func TestDefaultFileStore(t *testing.T) {
 		t.Errorf("baseDir esperado '%s', obtenido '%s'", expected, store.baseDir)
 	}
 }
+
+func TestFileStore_IgnoresManifestFiles(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "harness-store-manifest-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	store := NewFileStore(tmpDir)
+
+	// Crear una sesión válida
+	s1 := &SessionRecord{
+		ID:        "valid_sess",
+		Status:    StatusRunning,
+		StartedAt: time.Now(),
+	}
+	if err := store.Save(s1); err != nil {
+		t.Fatalf("Save falló: %v", err)
+	}
+
+	// Crear un archivo manifest espurio en la misma carpeta
+	manifestData := []byte(`{"session_id":"valid_sess","projected_hash":{}}`)
+	if err := os.WriteFile(filepath.Join(tmpDir, "valid_sess.manifest.json"), manifestData, 0644); err != nil {
+		t.Fatalf("WriteFile manifest falló: %v", err)
+	}
+
+	list, err := store.List()
+	if err != nil {
+		t.Fatalf("List falló: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("se esperaba 1 sesión, obtenidas %d: %+v", len(list), list)
+	}
+	if list[0].ID != "valid_sess" {
+		t.Errorf("ID esperado 'valid_sess', obtenido '%s'", list[0].ID)
+	}
+}
+

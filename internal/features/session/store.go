@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -129,6 +130,9 @@ func (f *FileStore) Get(id string) (*SessionRecord, error) {
 	if err := json.Unmarshal(data, &record); err != nil {
 		return nil, fmt.Errorf("error al deserializar sesión '%s': %w", id, err)
 	}
+	if record.ID == "" {
+		return nil, fmt.Errorf("sesión '%s' no es un registro válido", id)
+	}
 
 	return &record, nil
 }
@@ -146,13 +150,13 @@ func (f *FileStore) List() ([]SessionRecord, error) {
 
 	var records []SessionRecord
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" || strings.HasSuffix(entry.Name(), ".manifest.json") {
 			continue
 		}
 
 		id := entry.Name()[:len(entry.Name())-len(".json")]
 		rec, err := f.Get(id)
-		if err == nil && rec != nil {
+		if err == nil && rec != nil && rec.ID != "" {
 			records = append(records, *rec)
 		}
 	}

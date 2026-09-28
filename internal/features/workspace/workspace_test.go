@@ -506,7 +506,7 @@ func TestGitProvider_DiffWorktree_Mock(t *testing.T) {
 	mockGit := newMockGitClient()
 	mockGit.runResponses["rev-parse --is-inside-work-tree"] = "true"
 	mockGit.runResponses["merge-base HEAD harness/sess_mock"] = "abc1234"
-	mockGit.runResponses["status --porcelain"] = "?? untracked.txt\n M modified.txt"
+	mockGit.runResponses["status --porcelain -uall"] = "?? untracked.txt\n M modified.txt"
 	mockGit.runResponses["add -N -- untracked.txt"] = ""
 	mockGit.runResponses["reset -q -- untracked.txt"] = ""
 	mockGit.runResponses["diff abc1234"] = "diff --git a/modified.txt b/modified.txt\n+change"
@@ -579,6 +579,10 @@ func TestGitProvider_DiffWorktree_RealGit(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(ws.WorktreeDir, "committed.txt"), []byte("comiteado\n"), 0644)
 	runGit(ws.WorktreeDir, "add", "committed.txt")
 	runGit(ws.WorktreeDir, "commit", "-m", "commit en worktree")
+	// d) Archivo untracked dentro de subdirectorio nuevo (debe resolverse vía -uall sin error de /dev/null a directorio)
+	nestedDir := filepath.Join(ws.WorktreeDir, "src", "components", "Foo")
+	_ = os.MkdirAll(nestedDir, 0755)
+	_ = os.WriteFile(filepath.Join(nestedDir, "index.ts"), []byte("export const Foo = () => null;\n"), 0644)
 
 	// 1. Diff completo
 	diffOut, err := provider.DiffWorktree(ctx, tmpDir, ws.WorktreeDir, ws.BranchName, false)
@@ -594,13 +598,19 @@ func TestGitProvider_DiffWorktree_RealGit(t *testing.T) {
 	if !strings.Contains(diffOut, "committed.txt") {
 		t.Errorf("diffOut debió contener committed.txt: %s", diffOut)
 	}
+	if !strings.Contains(diffOut, "src/components/Foo/index.ts") {
+		t.Errorf("diffOut debió contener src/components/Foo/index.ts: %s", diffOut)
+	}
+	if strings.Contains(diffOut, "Could not access") || strings.Contains(diffOut, "error:") {
+		t.Errorf("diffOut no debe contener errores de acceso a directorios: %s", diffOut)
+	}
 
 	// 2. Diff con --stat
 	statOut, err := provider.DiffWorktree(ctx, tmpDir, ws.WorktreeDir, ws.BranchName, true)
 	if err != nil {
 		t.Fatalf("DiffWorktree stat falló: %v", err)
 	}
-	if !strings.Contains(statOut, "file1.txt") || !strings.Contains(statOut, "untracked.txt") || !strings.Contains(statOut, "committed.txt") {
+	if !strings.Contains(statOut, "file1.txt") || !strings.Contains(statOut, "untracked.txt") || !strings.Contains(statOut, "committed.txt") || !strings.Contains(statOut, "src/components/Foo/index.ts") {
 		t.Errorf("statOut no contiene todos los archivos: %s", statOut)
 	}
 
