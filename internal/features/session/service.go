@@ -56,6 +56,7 @@ type Service interface {
 	Merge(ctx context.Context, id string, opts MergeOptions) (*workspace.MergeResult, error)
 	Metrics(ctx context.Context, id string) (*metrics.SessionMetrics, error)
 	LogEvent(ctx context.Context, evt *logger.Event) error
+	Context(ctx context.Context, id string) (*SessionContext, error)
 	GetEvents(ctx context.Context, id string) ([]logger.Event, error)
 	WatchEvents(ctx context.Context, id string) (<-chan logger.Event, error)
 	Cleanup(ctx context.Context, id string) error
@@ -531,6 +532,83 @@ func (s *sessionService) Metrics(ctx context.Context, id string) (*metrics.Sessi
 	}
 
 	return s.metrics.GetMetrics(ctx, id, targetDir)
+}
+
+func (s *sessionService) Context(ctx context.Context, id string) (*SessionContext, error) {
+	if s.store == nil {
+		return nil, errors.New("store no inicializado")
+	}
+	if s.logger == nil {
+		return nil, errors.New("logger no inicializado")
+	}
+
+	record, err := s.store.Get(id)
+	if err != nil {
+		return nil, err
+	}
+
+	events, err := s.logger.GetEvents(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("error al obtener eventos de la sesión '%s': %w", id, err)
+	}
+
+	sc := &SessionContext{
+		SessionID:  record.ID,
+		Provider:   record.Provider,
+		Branch:     "harness/" + record.ID,
+		Toolkits:   record.Profiles,
+		WorkingDir: record.WorkingDir,
+		Status:     string(record.Status),
+		StartedAt:  record.StartedAt,
+		FinishedAt: record.FinishedAt,
+		DurationMs: record.DurationMs,
+		Events:     events,
+	}
+
+	if sc.Toolkits == nil {
+		sc.Toolkits = []string{}
+	}
+
+	for _, evt := range events {
+		if evt.Stage == logger.StagePending && evt.Metadata != nil {
+			if v, ok := evt.Metadata["provider"].(string); ok && v != "" {
+				sc.Provider = v
+			}
+			if v, ok := evt.Metadata["toolkits"].([]string); ok {
+				sc.Toolkits = v
+			} else if v, ok := evt.Metadata["toolkits"].([]any); ok {
+				toolkits := make([]string, 0, len(v))
+				for _, t := range v {
+					if s, ok := t.(string); ok {
+						toolkits = append(toolkits, s)
+					}
+				}
+				sc.Toolkits = toolkits
+			}
+			if v, ok := evt.Metadata["branch"].(string); ok && v != "" {
+				sc.Branch = v
+			}
+			if v, ok := evt.Metadata["initial_prompt"].(string); ok {
+				sc.InitialPrompt = v
+			}
+			if v, ok := evt.Metadata["working_dir"].(string); ok && v != "" {
+				sc.WorkingDir = v
+			}
+			break
+		}
+	}
+
+	for i := len(events) - 1; i >= 0; i-- {
+		evt := events[i]
+		if evt.Stage == logger.StageFinish && evt.Metadata != nil {
+			if v, ok := evt.Metadata["files_changed"].(string); ok && v != "" {
+				sc.FilesChanged = v
+			}
+			break
+		}
+	}
+
+	return sc, nil
 }
 
 func (s *sessionService) LogEvent(ctx context.Context, evt *logger.Event) error {

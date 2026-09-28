@@ -2500,3 +2500,166 @@ func TestMcpCmd_Protocol(t *testing.T) {
 		t.Errorf("Se esperaba que tools/list incluyera 'test_mcp_echo', obtenido:\n%s", outStr)
 	}
 }
+
+func TestSessionContextCmd_Help(t *testing.T) {
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"session", "context", "--help"})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("session context --help falló: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "context") {
+		t.Errorf("salida de ayuda no contiene 'context': %s", out)
+	}
+	if !strings.Contains(out, "handoff") {
+		t.Errorf("salida de ayuda no contiene 'handoff': %s", out)
+	}
+}
+
+func TestSessionContextCmd_Formatted(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	store := session.NewFileStore(tmpDir)
+	loggerSvc := logger.NewService(tmpDir)
+	ctx := context.Background()
+
+	sessID := "ctx-test-01"
+	_ = store.Save(&session.SessionRecord{
+		ID:         sessID,
+		Provider:   "agy",
+		Status:     session.StatusCompleted,
+		WorkingDir: tmpDir,
+		Profiles:   []string{"gz-ia"},
+		StartedAt:  time.Now().Add(-30 * time.Minute),
+	})
+
+	st := logger.StatusOK
+	_ = loggerSvc.Emit(ctx, &logger.Event{
+		SessionID: sessID,
+		AgentID:   "orchestrator",
+		Role:      "orchestrator",
+		Action:    "Sesión de chat iniciada",
+		Stage:     logger.StagePending,
+		Metadata: map[string]any{
+			"provider":       "agy",
+			"toolkits":       []string{"gz-ia"},
+			"branch":         "harness/" + sessID,
+			"initial_prompt": "desarrollar feature context",
+			"working_dir":    tmpDir,
+		},
+	})
+	_ = loggerSvc.Emit(ctx, &logger.Event{
+		SessionID: sessID,
+		AgentID:   "orchestrator",
+		Role:      "orchestrator",
+		Action:    "Sesión finalizada exitosamente",
+		Stage:     logger.StageFinish,
+		Status:    &st,
+		Metadata: map[string]any{
+			"exit_code":  0,
+			"duration_s": int64(1800),
+		},
+	})
+
+	oldStore := defaultSessionStore
+	oldLogger := defaultSessionLogger
+	defaultSessionStore = store
+	defaultSessionLogger = loggerSvc
+	defer func() {
+		defaultSessionStore = oldStore
+		defaultSessionLogger = oldLogger
+	}()
+
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"session", "context", sessID, "--dir", tmpDir})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("session context falló: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, sessID) {
+		t.Errorf("salida no contiene session ID '%s': %s", sessID, out)
+	}
+	if !strings.Contains(out, "agy") {
+		t.Errorf("salida no contiene proveedor 'agy': %s", out)
+	}
+	if !strings.Contains(out, "harness/"+sessID) {
+		t.Errorf("salida no contiene rama: %s", out)
+	}
+}
+
+func TestSessionContextCmd_JSON(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	store := session.NewFileStore(tmpDir)
+	loggerSvc := logger.NewService(tmpDir)
+	ctx := context.Background()
+
+	sessID := "ctx-json-01"
+	_ = store.Save(&session.SessionRecord{
+		ID:         sessID,
+		Provider:   "claude",
+		Status:     session.StatusCompleted,
+		WorkingDir: tmpDir,
+		Profiles:   []string{"maintainer"},
+		StartedAt:  time.Now().Add(-10 * time.Minute),
+	})
+
+	_ = loggerSvc.Emit(ctx, &logger.Event{
+		SessionID: sessID,
+		AgentID:   "orchestrator",
+		Role:      "orchestrator",
+		Action:    "Sesión iniciada",
+		Stage:     logger.StagePending,
+		Metadata: map[string]any{
+			"provider":       "claude",
+			"toolkits":       []string{"maintainer"},
+			"branch":         "harness/" + sessID,
+			"initial_prompt": "probar json output",
+			"working_dir":    tmpDir,
+		},
+	})
+
+	oldStore := defaultSessionStore
+	oldLogger := defaultSessionLogger
+	defaultSessionStore = store
+	defaultSessionLogger = loggerSvc
+	defer func() {
+		defaultSessionStore = oldStore
+		defaultSessionLogger = oldLogger
+	}()
+
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"session", "context", sessID, "--dir", tmpDir, "--json"})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("session context --json falló: %v", err)
+	}
+
+	var sc session.SessionContext
+	if err := json.Unmarshal(buf.Bytes(), &sc); err != nil {
+		t.Fatalf("JSON inválido en salida: %v\nSalida: %s", err, buf.String())
+	}
+	if sc.SessionID != sessID {
+		t.Errorf("SessionID esperado '%s', obtenido '%s'", sessID, sc.SessionID)
+	}
+	if sc.Provider != "claude" {
+		t.Errorf("Provider esperado 'claude', obtenido '%s'", sc.Provider)
+	}
+}
+

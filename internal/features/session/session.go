@@ -360,6 +360,12 @@ func (s *Session) Start(ctx context.Context) error {
 		if s.Config.Resume {
 			action = "Sesión de chat reanudada"
 		}
+
+		initialPrompt := s.Config.InitialPrompt
+		if len(initialPrompt) > 200 {
+			initialPrompt = initialPrompt[:200] + "..."
+		}
+
 		_ = s.Logger.Emit(ctx, &logger.Event{
 			SessionID: s.Config.ID,
 			AgentID:   "orchestrator",
@@ -367,6 +373,13 @@ func (s *Session) Start(ctx context.Context) error {
 			Action:    action,
 			Stage:     logger.StagePending,
 			Status:    nil,
+			Metadata: map[string]any{
+				"provider":       s.Config.Provider,
+				"toolkits":       s.Config.Profiles,
+				"branch":         "harness/" + s.Config.ID,
+				"initial_prompt": initialPrompt,
+				"working_dir":    s.Config.WorkingDir,
+			},
 		})
 	}
 
@@ -408,6 +421,15 @@ func (s *Session) Start(ctx context.Context) error {
 
 	if s.Logger != nil {
 		dur := record.DurationMs
+		finishMeta := map[string]any{
+			"exit_code":  exitCode,
+			"duration_s": record.DurationMs / 1000,
+		}
+		if s.Workspace != nil {
+			if diff, diffErr := s.Workspace.DiffWorktree(ctx, record.WorkingDir, record.WorktreeDir, record.BranchName, true); diffErr == nil && diff != "" {
+				finishMeta["files_changed"] = diff
+			}
+		}
 		if runErr != nil {
 			st := logger.StatusFailed
 			_ = s.Logger.Emit(ctx, &logger.Event{
@@ -419,6 +441,7 @@ func (s *Session) Start(ctx context.Context) error {
 				Status:     &st,
 				DurationMs: &dur,
 				Error:      runErr.Error(),
+				Metadata:   finishMeta,
 			})
 		} else {
 			st := logger.StatusOK
@@ -430,6 +453,7 @@ func (s *Session) Start(ctx context.Context) error {
 				Stage:      logger.StageFinish,
 				Status:     &st,
 				DurationMs: &dur,
+				Metadata:   finishMeta,
 			})
 		}
 	}

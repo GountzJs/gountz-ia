@@ -369,6 +369,9 @@ func (m *mockTUISessionService) Metrics(ctx context.Context, id string) (*metric
 	return nil, nil
 }
 func (m *mockTUISessionService) LogEvent(ctx context.Context, evt *logger.Event) error { return nil }
+func (m *mockTUISessionService) Context(ctx context.Context, id string) (*session.SessionContext, error) {
+	return nil, nil
+}
 func (m *mockTUISessionService) GetEvents(ctx context.Context, id string) ([]logger.Event, error) {
 	return nil, nil
 }
