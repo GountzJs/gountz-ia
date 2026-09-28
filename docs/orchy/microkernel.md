@@ -6,18 +6,16 @@ Inspirado en la filosofía Unix y los principios de microkernel de sistemas oper
 
 ---
 
-## Filosofía: El "Kernel Honesto" (Honest Kernel)
+## Modelo de Aislamiento y Circuit Breaker
 
-En los sistemas tradicionales de agentes de IA, los errores de herramientas externas suelen ser silenciados, capturados genéricamente o falseados como respuestas vacías. Esto provoca alucinaciones en el modelo de lenguaje, que asume que una operación se ejecutó con éxito cuando en realidad falló silenciosamente.
+Orchy implementa supervisión de fallos en memoria para herramientas y extensiones externas:
+- **Propagación Explícita de Errores:** Cuando una herramienta falla, el kernel retorna el error con su traza y actualiza el estado de salud sin enmascarar códigos de retorno.
+- **Estado de Salud Tipado:** El agente y el servidor MCP reciben el estado operativo de cada herramienta (`HEALTHY`, `DEGRADED`, `DEAD`).
+- **Contención de Fallos:** Captura excepciones no controladas (`recover()` ante panics) y aísla fallos recurrentes mediante Circuit Breakers para evitar que el proceso del kernel o el servidor MCP se detengan.
 
-Orchy se basa en el principio del **Kernel Honesto**:
-- **Cero Falsos Positivos:** Si una herramienta falla, el kernel reporta el error exacto con su traza y estado de salud.
-- **Transparencia Radical:** El agente recibe información fidedigna sobre la capacidad o degradación del sistema.
-- **Aislamiento de Fallos:** El colapso de un plugin o herramienta externa nunca debe comprometer la estabilidad del kernel ni de otros servicios.
-
-> [!NOTE] Aislamiento de Fallos vs Seguridad de Sistema Operativo
-> El aislamiento provisto por Orchy es de **resiliencia de software y contención de fallos en memoria**: captura excepciones no controladas (`recover()` ante panics) y aísla fallos repetitivos mediante Circuit Breakers para evitar que el proceso del kernel o el servidor MCP colapsen.
-> **No es un sandbox de sistema operativo:** las herramientas ejecutadas (scripts locales o comandos de `tools.json`) se ejecutan con los mismos privilegios del usuario del sistema en su máquina.
+> [!NOTE] Aislamiento en Memoria vs Sandbox de Sistema Operativo
+> El aislamiento en Orchy opera a nivel de **resiliencia de software y contención de errores en tiempo de ejecución**.
+> No constituye un sandbox de sistema operativo: las herramientas locales o comandos declarados en `tools.json` se ejecutan con los privilegios del usuario en el host.
 
 ---
 

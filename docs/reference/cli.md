@@ -161,7 +161,7 @@ Detiene forzosamente el proceso del agente de la sesión.
 gz-ia session kill <session-id> [-d <ruta>]
 ```
 
-Envía `SIGTERM` al grupo de procesos y escala a `SIGKILL` si no finaliza dentro del tiempo de espera (en Windows ejecuta `taskkill /F /T` para terminar el árbol de procesos de forma garantizada).
+Envía `SIGTERM` al grupo de procesos y escala a `SIGKILL` si no finaliza dentro del tiempo de espera (en Windows ejecuta `taskkill /F /T` para terminar el árbol de procesos).
 
 ---
 

@@ -1,33 +1,33 @@
 # Variables de Entorno y Secretos Locales (Vault)
 
-Gountz IA (`gz-ia`) incluye un gestor local de variables de entorno y credenciales (`internal/features/vault`), diseñado para suministrar configuraciones a los agentes de IA de forma centralizada sin ensuciar tu shell global ni comitearlas en el historial de Git.
+Gountz IA (`gz-ia`) incluye un gestor local de variables de entorno y credenciales (`internal/features/vault`), diseñado para suministrar configuraciones a los agentes de IA de forma centralizada sin modificar las variables del shell global ni incluirlas en el historial de Git.
 
 ---
 
-## 1. Filosofía de Seguridad y Almacenamiento
+## 1. Seguridad y Almacenamiento
 
 El Vault se administra mediante el archivo local `.harness/vault.json`:
 
 - **Formato en Texto Plano:** Se almacena en formato JSON estándar sin cifrado simétrico en reposo con contraseña maestra. No introduzcas tokens bancarios ni credenciales de infraestructura crítica sin evaluar tu modelo de amenazas local.
 - **Permisos Estrictos POSIX `0600`:** Únicamente tu usuario del sistema operativo tiene permisos de lectura y escritura (`rw-------`). Cualquier intento de lectura o modificación por otros usuarios locales del sistema operativo es bloqueado por los permisos del sistema de archivos.
-- **Aislamiento en Git vía `.git/info/exclude`:** La carpeta `.harness/` se encuentra excluida automáticamente del seguimiento de Git mediante `.git/info/exclude` local, garantizando que el archivo nunca viaje al repositorio remoto ni altere tu `git status`.
+- **Aislamiento en Git vía `.git/info/exclude`:** La carpeta `.harness/` se encuentra excluida automáticamente del seguimiento de Git mediante `.git/info/exclude` local, evitando que el archivo se incluya en el repositorio remoto o afecte el `git status`.
 - **Escrituras Atómicas:** Toda operación (`set`, `delete`) escribe primero en un archivo temporal (`.vault.json.tmp`) antes de aplicar un reemplazo atómico con `os.Rename`, evitando archivos corruptos si se interrumpe el comando.
 
 > [!WARNING] Modelo de Acceso del Agente en Sesión
-> Ten en cuenta dos consideraciones clave sobre cómo el agente accede a los secretos:
-> 1. **Inyección completa de variables de entorno:** Al iniciar una sesión, `gz-ia` inyecta la totalidad de las variables guardadas en el vault como variables de entorno del proceso hijo del agente. Cualquier comando ejecutado en la sesión (por ejemplo, `env` o `printenv`) tendrá visibilidad de estas claves.
+> Ten en cuenta dos consideraciones sobre cómo el agente accede a los secretos:
+> 1. **Inyección de variables de entorno:** Al iniciar una sesión, `gz-ia` inyecta las variables guardadas en el vault como variables de entorno del proceso hijo del agente. Cualquier comando ejecutado en la sesión (por ejemplo, `env` o `printenv`) tendrá visibilidad de estas claves.
 > 2. **Ruta física accesible desde el worktree:** Desde el árbol de trabajo de la sesión (`.harness/worktrees/<id>`), el archivo `.harness/vault.json` se encuentra a dos niveles de distancia (`../../vault.json`). Un agente con herramientas de lectura de disco o permisos de terminal puede leer el archivo directamente.
 
 ---
 
-## 2. Atención: Claude Code, OpenCode y Facturación de API
+## 2. Configuración de API Keys
 
-> [!IMPORTANT] Respeta tu Suscripción de Claude Code
-> Si utilizas **Claude Code** con tu suscripción oficial Pro o Team (autenticado mediante `claude login`), **no almacenes `ANTHROPIC_API_KEY` en el vault**.
+> [!IMPORTANT] Claude Code y API Keys
+> Si utilizas **Claude Code** con suscripción oficial Pro o Team (autenticado mediante `claude login`), **no almacenes `ANTHROPIC_API_KEY` en el vault**.
 > 
-> Cuando `ANTHROPIC_API_KEY` está presente en el entorno de ejecución, Claude Code prioriza esa clave y factura el consumo de tokens a la cuenta de la API de Anthropic, en lugar de utilizar los límites de tu suscripción contratada.
+> Cuando `ANTHROPIC_API_KEY` está presente en el entorno de ejecución, Claude Code prioriza esa clave y factura el consumo de tokens a la cuenta de la API de Anthropic, en lugar de utilizar los límites de tu suscripción.
 > 
-> Del mismo modo, **OpenCode** soporta múltiples motores y proveedores (locales, Anthropic, OpenAI, Ollama); solo configura claves de API si tu modelo específico lo requiere.
+> En **OpenCode**, solo configura claves de API si tu modelo o proveedor específico lo requiere.
 
 `gz-ia` no impone claves fijas para iniciar sesiones. Únicamente advertirá sobre variables no configuradas si los toolkits o presets que actives declaran explícitamente dependencias en su propiedad `env`.
 

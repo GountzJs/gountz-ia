@@ -21,7 +21,7 @@ Al interactuar con agentes de terminal que editan código de forma autónoma o s
 
 ## Qué Aísla y Qué No Aísla el Harness
 
-Es fundamental comprender con exactitud las fronteras técnicas de aislamiento que provee `gz-ia`:
+Fronteras técnicas de aislamiento en `gz-ia`:
 
 ### Lo que sí aísla: El árbol de trabajo (Working Tree)
 - **Archivos desacoplados:** Cada sesión se ejecuta en `.harness/worktrees/<id>` sobre una rama dedicada (`harness/<id>`).
@@ -62,7 +62,7 @@ Microkernel modular en `packages/orchy` que implementa un servidor MCP JSON-RPC 
 
 ---
 
-## Diferencial Real: Con y Sin Harness
+## Comparativa de Operación: Con y Sin Harness
 
 | Aspecto | Ejecución Directa de Agentes | Con `gz-ia` Harness |
 | :--- | :--- | :--- |

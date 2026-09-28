@@ -181,4 +181,4 @@ chmod +x validate-session.sh
 ./validate-session.sh a8f102c4
 ```
 
-Este flujo garantiza que únicamente código que pase el 100% de tus baterías de pruebas automáticas sea promocionado al árbol principal de trabajo.
+Este flujo condiciona la integración del código en la rama principal a la aprobación de las pruebas automáticas.

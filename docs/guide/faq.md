@@ -1,13 +1,13 @@
-# Preguntas Frecuentes y Objeciones Reales (FAQ)
+# Preguntas Frecuentes (FAQ)
 
-Esta sección responde directamente, con honestidad técnica y sin rodeos de marketing, las preguntas y dudas más comunes que surgen al evaluar o utilizar `gz-ia`.
+Preguntas frecuentes sobre arquitectura, seguridad, compatibilidad y flujos de trabajo en `gz-ia`.
 
 ---
 
 ## 1. ¿Qué me da que no tenga usando Claude Code o Antigravity directo?
 
-> [!TIP] Respuesta en dos líneas
-> **Un flujo uniforme de revisión y control en Git independiente del agente que uses, más toolkits modulares reutilizables (directivas, reglas, skills y MCP) que se proyectan automáticamente en cualquier CLI.**
+> [!TIP] En síntesis
+> **Un flujo uniforme de revisión y control en Git independiente del agente utilizado, y toolkits modulares reutilizables (directivas, reglas, skills y MCP) proyectados en cualquier CLI.**
 
 Si trabajas solo, utilizas un único agente de terminal y estás conforme con que modifique directamente tu directorio de trabajo, **probablemente no necesites `gz-ia`**.
 
@@ -72,34 +72,34 @@ Si tu agente necesita ejecutar tests o linters que dependen de `node_modules`, t
 
 ## 4. ¿Funciona en macOS? ¿Y en Windows?
 
-Queremos ser 100% transparentes sobre la compatibilidad de plataformas en la versión actual (v0.1.0):
+Compatibilidad por plataforma en la versión actual (v0.1.0):
 
 | Plataforma | Estado | Detalle |
 | :--- | :--- | :--- |
 | **Linux (x86_64 / amd64)** | **Soportado** | Plataforma primaria de desarrollo. Todas las características operativas. |
-| **macOS (Apple Silicon / Intel)** | **En estabilización** | Compila y ejecuta. Las incompatibilidades previas se debían al uso de constantes de terminal no portables (`unix.TCGETS` en lugar de `unix.TIOCGETA` o abstracciones de terminal portables). |
-| **Windows (amd64)** | **Parcial** | La ejecución de sesiones y la TUI funcionan. Sin embargo, la actualización atómica en caliente (`gz-ia update`) no puede reemplazar el binario activo en memoria debido al bloqueo de archivos de Win32. Se recomienda descargar los paquetes `.zip` directamente desde GitHub Releases. |
+| **macOS (Apple Silicon / Intel)** | **En estabilización** | Compila y ejecuta. |
+| **Windows (amd64)** | **Parcial** | La ejecución de sesiones y la TUI funcionan. La actualización atómica en caliente (`gz-ia update`) no reemplaza el binario en memoria debido al bloqueo de archivos de Win32. Se recomienda descargar los paquetes `.zip` directamente desde GitHub Releases. |
 
 ---
 
 ## 5. ¿Necesito una API Key? ¿Usa mi suscripción?
 
-**`gz-ia` no tiene cuenta propia, servidores de autenticación ni cobra suscripciones.**
+**`gz-ia` no requiere cuentas externas ni servidores de autenticación propios.**
 
-`gz-ia` es un arnés local que envuelve los CLIs que ya tienes instalados en tu máquina (`agy`, `claude`, `opencode`, `pi-agent`).
-- Si usas **Claude Code** con tu suscripción oficial Pro o Team (vía `claude login`), `gz-ia` la respeta de forma transparente sin intermediarios. **No es necesario configurar `ANTHROPIC_API_KEY`** (y no se recomienda guardarla en el vault si tienes suscripción, ya que Claude Code prioriza la API key y facturaría consumo por tokens).
-- Si usas **Antigravity** con tu cuenta de Google, se ejecuta directamente contra tu sesión local autenticada.
-- Si usas **OpenCode**, se conecta a los proveedores que tengas configurados local o remotamente.
+`gz-ia` es un arnés local que interactúa con las CLIs instaladas en el sistema (`agy`, `claude`, `opencode`, `pi-agent`).
+- Si usas **Claude Code** con suscripción oficial Pro o Team (vía `claude login`), `gz-ia` utiliza directamente la sesión autenticada existente. **No es necesario configurar `ANTHROPIC_API_KEY`** (si se define en el vault, Claude Code prioriza la API key y factura por consumo de tokens).
+- Si usas **Antigravity** con tu cuenta de Google, se ejecuta directamente contra la sesión local autenticada.
+- Si usas **OpenCode**, se conecta a los proveedores configurados en el entorno local.
 
 ---
 
 ## 6. ¿Manda algo afuera? ¿Tiene telemetría?
 
-**Cero telemetría. Absolutamente nada sale de tu máquina.**
+**No incluye telemetría ni llamadas a servicios externos.**
 
-- No existen analíticas, tracking de uso ni servidores de recolección de datos.
-- Toda la metadata de ejecución, trazas y métricas se guardan exclusivamente de forma local dentro de la carpeta `.harness/` de tu propio proyecto.
-- El código es 100% auditable y de código abierto bajo licencia MIT.
+- No recopila analíticas ni métricas de uso remoto.
+- Toda la metadata de ejecución, trazas y métricas se almacena localmente en la carpeta `.harness/` del proyecto.
+- El código es abierto bajo licencia MIT.
 
 ---
 
@@ -158,7 +158,7 @@ Si mientras el agente trabajaba en su worktree aislado creaste nuevos commits en
 
 1. Al ejecutar `gz-ia session get <id>` (o `gz-ia session merge <id>`), `gz-ia` realiza un `git merge` estándar de la rama `harness/<id>` sobre tu rama activa.
 2. **Si no hay conflictos en las mismas líneas:** Git realiza una fusión limpia automática.
-3. **Si existen conflictos:** Git detiene el proceso de fusión informando honestamente los archivos en colisión. `gz-ia` no sobreescribe ni destruye tu trabajo. El worktree de la sesión permanece intacto para que puedas resolver los conflictos manualmente con tus herramientas habituales o abortar con `git merge --abort`.
+3. **Si existen conflictos:** Git detiene el proceso de fusión informando los archivos en colisión. `gz-ia` no sobreescribe ni destruye tu trabajo. El worktree de la sesión permanece intacto para que puedas resolver los conflictos manualmente con tus herramientas habituales o abortar con `git merge --abort`.
 
 ---
 

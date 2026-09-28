@@ -6,18 +6,18 @@ Para evitar que los agentes de IA interfieran con el trabajo activo del desarrol
 
 ## Qué Aísla y Qué No Aísla un Git Worktree
 
-Es fundamental delimitar con claridad técnica el alcance y los límites del aislamiento:
+Alcance y límites del aislamiento:
 
 ### Qué sí aísla: El árbol de archivos de trabajo (Working Tree)
 - **Archivos independientes en disco:** Cada sesión opera en `.harness/worktrees/<id>` sobre una rama dedicada `harness/<id>`.
-- **Protección del editor:** El agente no toca los archivos abiertos en tu IDE ni tu compilación en caliente (*hot-reload*).
-- **Control de estado en tu rama:** Tu rama base permanece limpia; su `git status` no se ve afectado mientras el agente trabaja en paralelo.
+- **Protección del editor:** El agente no altera los archivos abiertos en el IDE ni la compilación en caliente (*hot-reload*).
+- **Control de estado en la rama base:** La rama base permanece limpia; su `git status` no se altera mientras el agente opera en paralelo.
 
-### Guardrails Automáticos de Git en el Worktree (Protección de Repositorio)
+### Guardrails de Git en el Worktree (Protección de Repositorio)
 Para prevenir errores y modificaciones accidentales en Git, `gz-ia` configura guardrails activos por worktree:
 - **Bloqueo de `git push` (`pre-push` hook):** Impide que comandos automáticos envíen cambios al remoto desde el worktree de la sesión.
-- **Protección estricta de ramas (`reference-transaction` hook):** El agente solo tiene permitido operar dentro de su propia rama (`refs/heads/harness/<sessionID>` y `HEAD`). No puede modificar `main`, `master`, ni la rama de otra sesión simultánea (`refs/heads/harness/<otra-sesión>`).
-- **Reenvío seguro de hooks de proyecto (Husky, lint-staged, commitlint):** Si el repositorio base cuenta con hooks de `commit-msg` o `pre-commit`, los hooks del worktree los invocan de forma transparente para asegurar que las convenciones de commit del proyecto se respeten fielmente.
+- **Protección de ramas (`reference-transaction` hook):** El agente solo tiene permitido operar dentro de su propia rama (`refs/heads/harness/<sessionID>` y `HEAD`). No puede modificar `main`, `master`, ni la rama de otra sesión simultánea (`refs/heads/harness/<otra-sesión>`).
+- **Reenvío de hooks de proyecto (Husky, lint-staged, commitlint):** Si el repositorio base cuenta con hooks de `commit-msg` o `pre-commit`, los hooks del worktree los invocan directamente para preservar las convenciones de commit del proyecto.
 - **Manifiesto de proyección agéntica y eliminación de `core.excludesFile`:** En versiones anteriores se recurría a `core.excludesFile`, lo cual resultaba frágil ante diferentes versiones de Git y podía enmascarar archivos del proyecto. `gz-ia` sustituyó este mecanismo por un **Manifiesto de Proyección** explícito (`.harness/sessions/<id>.manifest.json`). Este archivo registra con exactitud qué archivos fueron proyectados de forma efímera y cuáles pertenecían originalmente al repositorio base.
 - **Configuración aislada (`extensions.worktreeConfig`):** La directiva `core.hooksPath` se establece exclusivamente a nivel de worktree (`config.worktree`) sin afectar la configuración global del repositorio.
 
@@ -27,16 +27,16 @@ Al inicializar una sesión o proyectar perfiles (`-P`), `gz-ia` persiste en `.ha
 - **`OriginalFiles` (`map[string]string`):** Mapa de ruta relativa a su contenido textual previo a la proyección. Aplica a archivos legítimos preexistentes en el repositorio que requirieron fusión en caliente (como un `AGENTS.md` del equipo o un `.mcp.json` compartido).
 - **`ProjectedHash` (`map[string]string`):** Suma SHA-256 de lo que proyectó `gz-ia` para cada ruta al montar la sesión.
 
-#### ¿Por qué `session get` y `session diff` son No Destructivos?
-1. **Preservación estricta de archivos legítimos del repositorio:** Archivos como `.agents/config.json` o `.mcp.json` que formaban parte del repositorio antes de la sesión **nunca son borrados**. Si el agente no alteró su contenido (su hash en el worktree coincide con `ProjectedHash`), son restaurados fielmente a su versión previa (`OriginalFiles`) antes del merge o cálculo de diff.
-2. **Preservación de ediciones intencionales del agente:** Si durante la sesión el agente edita intencionalmente un archivo proyectado (por ejemplo, actualiza o añade una convención de equipo a `AGENTS.md`), el hash actual diferirá de `ProjectedHash`. El harness detecta la mutación intencional y **preserva los cambios del agente**, incorporándolos limpiamente a la rama base en `session get`.
-3. **Purga limpia de artefactos puramente efímeros:** Si un archivo perteneciente a `CreatedFiles` mantiene su hash original proyectado (`ProjectedHash`), el arnés lo remueve antes de integrar los cambios, evitando ensuciar el árbol ni dejar rastros en el historial de Git.
+#### Comportamiento No Destructivo en `session get` y `session diff`
+1. **Preservación de archivos legítimos del repositorio:** Archivos como `.agents/config.json` o `.mcp.json` que formaban parte del repositorio antes de la sesión **no se eliminan**. Si el agente no alteró su contenido (su hash en el worktree coincide con `ProjectedHash`), son restaurados a su versión previa (`OriginalFiles`) antes del merge o cálculo de diff.
+2. **Preservación de ediciones intencionales del agente:** Si durante la sesión el agente edita un archivo proyectado (por ejemplo, actualiza o añade una convención de equipo a `AGENTS.md`), el hash actual diferirá de `ProjectedHash`. El harness detecta la mutación y **preserva los cambios del agente**, incorporándolos a la rama base en `session get`.
+3. **Purga de artefactos efímeros:** Si un archivo perteneciente a `CreatedFiles` mantiene su hash original proyectado (`ProjectedHash`), el arnés lo remueve antes de integrar los cambios, evitando residuos en el historial de Git.
 
-### Alcance y Límites de los Guardrails: Prevención de Accidentes vs Sandbox
-> [!IMPORTANT] Prevención contra errores accidentales, no contención adversaria
-> Los guardrails de Git están diseñados para **prevenir errores y descuidos comunes** de los modelos de IA (como intentar un `git push` o cambiar de rama sin querer).
-> **No constituyen un sandbox de seguridad hermético:** Un agente con acceso a shell y permisos autónomos podría eludir los hooks intencionalmente ejecutando `git push --no-verify`, sobrescribiendo la configuración con `git -c core.hooksPath=/dev/null`, o accediendo al repositorio base con `cd ../../../`.
-> Si se requiere contención estricta frente a código no confiable, se debe ejecutar `gz-ia` dentro de un contenedor **Docker** o **DevContainer**.
+### Alcance y Límites de los Guardrails
+> [!IMPORTANT] Límites de los Guardrails
+> Los guardrails de Git previenen operaciones accidentales habituales (como ejecutar `git push` o alterar ramas activas).
+> **No constituyen un sandbox de seguridad hermético:** Un agente con acceso a shell y permisos autónomos podría eludir los hooks ejecutando `git push --no-verify`, sobrescribiendo la configuración con `git -c core.hooksPath=/dev/null`, o accediendo al repositorio base con `cd ../../../`.
+> Para contención estricta frente a código no confiable, se debe ejecutar `gz-ia` dentro de un contenedor **Docker** o **DevContainer**.
 
 ---
 

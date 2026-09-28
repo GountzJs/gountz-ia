@@ -57,38 +57,38 @@ Toda la metadata de la sesión se almacena de forma persistente y atómica en fo
 }
 ```
 
-### Garantía de Escritura Atómica
+### Escritura Atómica
 
-Para evitar corrupciones de datos en caso de apagados repentinos o caídas del sistema, `gz-ia` escribe los registros primero en un archivo temporal (`.harness/sessions/<id>.json.tmp`) y luego realiza una operación de sustitución atómica (`os.Rename`), garantizando consistencia absoluta en el disco.
+Para evitar corrupción de datos en caso de caídas del proceso o interrupciones del sistema, `gz-ia` escribe los registros primero en un archivo temporal (`.harness/sessions/<id>.json.tmp`) y luego realiza una sustitución atómica (`os.Rename`), manteniendo la consistencia en disco.
 
 ---
 
 ## Operaciones de Gestión de Sesiones
 
-`gz-ia` ofrece un catálogo completo de comandos para gobernar las sesiones:
+`gz-ia` provee comandos para administrar el ciclo de vida de las sesiones:
 
-### Listado Rápido (`session list`)
+### Listado (`session list`)
 Muestra una tabla con el identificador, agente, estado, rama y tiempo transcurrido de todas las sesiones registradas:
 
 ```bash
 gz-ia session list
 ```
 
-### Inspección Profunda (`session show`)
+### Inspección (`session show`)
 Despliega todos los campos del `SessionRecord`, incluyendo rutas completas, códigos de salida y métricas:
 
 ```bash
 gz-ia session show 3f9a12c8
 ```
 
-### Terminación Forzada (`session kill`)
-Envía de forma controlada una señal `SIGTERM` al grupo de procesos de la sesión y, si no responde tras un periodo de gracia, escala a `SIGKILL` (en Windows utiliza `taskkill /F /T` para podar el árbol completo de procesos), actualizando el estado de la sesión a `KILLED`:
+### Terminación de Procesos (`session kill`)
+Envía una señal `SIGTERM` al grupo de procesos de la sesión y, si no responde tras el tiempo de espera, escala a `SIGKILL` (en Windows utiliza `taskkill /F /T`), actualizando el estado de la sesión a `KILLED`:
 
 ```bash
 gz-ia session kill 3f9a12c8
 ```
 
-### Reanudación Transparente (`session resume`)
+### Reanudación de Sesiones (`session resume`)
 Reconecta la terminal con el agente en el espacio de trabajo original. Detecta el proveedor registrado e inyecta la bandera correspondiente (`--continue` para `agy`/`opencode`, `--resume` para `claude`/`pi-agent`):
 
 ```bash

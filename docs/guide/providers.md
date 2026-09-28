@@ -6,13 +6,13 @@ El arnés detecta los binarios en tu `PATH` (`exec.LookPath`) y traduce las inte
 
 ---
 
-## Matriz Real de Banderas y Garantías por Driver
+## Matriz de Banderas y Alcance por Driver
 
-::: warning Transparencia sobre los Permisos
-Los niveles `readonly`, `supervised` y `autonomous` **no son una jaula hermética del arnés**, sino un mapeo hacia las banderas de la CLI subyacente. Las garantías reales dependen exclusivamente de cómo cada agente interpreta dichas opciones.
+::: warning Alcance de los Permisos
+Los niveles `readonly`, `supervised` y `autonomous` corresponden a un mapeo hacia las banderas de la CLI subyacente. El comportamiento efectivo depende de cómo cada agente procesa dichas opciones.
 :::
 
-| Driver (`ID`) | Binario | Nivel de Permiso | Banderas Pasadas al Proceso | Qué Garantiza | Qué NO Garantiza |
+| Driver (`ID`) | Binario | Nivel de Permiso | Banderas Pasadas al Proceso | Alcance Operativo | Limitaciones |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **`agy`** | `agy` | `readonly`<br>`supervised`<br>`autonomous` | `--mode plan`<br>*(ninguna adicional)*<br>`--dangerously-skip-permissions` | En `readonly`, Antigravity no edita archivos.<br>En `supervised`, solicita confirmación interactiva `[y/N]`.<br>En `autonomous`, auto-aprueba herramientas. | En `autonomous`, el agente tiene acceso a comandos de shell en el host si sus herramientas lo permiten. |
 | **`claude`** | `claude` | `readonly`<br>`supervised`<br>`autonomous` | *(ninguna adicional)*<br>*(ninguna adicional)*<br>`--dangerously-skip-permissions` | En `supervised`, Claude Code solicita confirmación para comandos bash y mutaciones.<br>En `autonomous`, omite confirmaciones. | `claude` **no cuenta con un modo `--mode plan` nativo**. En `readonly`, el agente corre en modo interactivo sin banderas de bypass; si el modelo decide invocar herramientas de mutación, el modo solo lectura es declarativo a menos que el usuario rechace el prompt interactivo. |

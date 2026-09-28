@@ -41,7 +41,7 @@ features:
     link: /architecture/worktrees
   - icon: ⚿
     title: Variables de Entorno y Secretos (Vault)
-    details: Almacena credenciales locales en `.harness/vault.json` (permisos 0600) e inyección transparente en el entorno del agente, excluido del seguimiento de Git.
+    details: Almacena credenciales locales en `.harness/vault.json` (permisos 0600) e inyección en el entorno del agente, excluido del seguimiento de Git.
     link: /guide/vault
   - icon: ⌂
     title: 100% Local y Cero Telemetría
@@ -93,8 +93,8 @@ gz-ia start
 
 ---
 
-## Transparencia: Versión Alfa Activa
+## Estado del Proyecto
 
-`gz-ia` se encuentra en **versión v0.1.0**. El aislamiento en Git y la proyección de toolkits son completamente operativos en **Linux (amd64)** y en validación para **macOS**. La actualización en caliente en **Windows** cuenta con restricciones del sistema de archivos.
+`gz-ia` se encuentra en **versión v0.1.0**. El aislamiento en Git y la proyección de toolkits son operativos en **Linux (amd64)** y en validación para **macOS**. En **Windows** existen restricciones de bloqueo de archivos al actualizar binarios en caliente.
 
-Te invitamos a leer nuestra página de [Estado y Limitaciones Conocidas](/guide/limitations) y las [Preguntas Frecuentes](/guide/faq) antes de incorporarlo en flujos de producción.
+Consulta [Estado y Limitaciones Conocidas](/guide/limitations) y [Preguntas Frecuentes](/guide/faq).

@@ -1,8 +1,8 @@
 # Toolkits y Perfiles Emergentes
 
-En Gountz IA (`gz-ia`), la configuración y capacidades del agente ya no dependen de entidades rígidas ni de archivos monolíticos. El sistema adopta un modelo donde el **Toolkit** es la **unidad atómica de capacidad**, y el **Perfil** es una **composición emergente** en tiempo de ejecución.
+En Gountz IA (`gz-ia`), la configuración y capacidades del agente se organizan en dos conceptos: el **Toolkit** como **unidad atómica de capacidad**, y el **Perfil** como **composición en tiempo de ejecución**.
 
-Este enfoque resuelve la proliferación desordenada de carpetas `.agents/`, skills duplicadas y servidores MCP dispersos entre múltiples repositorios, garantizando un repositorio principal limpio y determinismo absoluto en cada sesión.
+Este modelo desacopla directivas, reglas y herramientas del repositorio base, permitiendo componer entornos de trabajo reproducibles para cada sesión.
 
 ---
 
@@ -10,23 +10,23 @@ Este enfoque resuelve la proliferación desordenada de carpetas `.agents/`, skil
 
 ### La Limitación de los Perfiles Estáticos
 En configuraciones tradicionales, los proyectos suelen acumular:
-1. **Reglas monolíticas:** Archivos `AGENTS.md` gigantescos que mezclan directivas de frontend, backend, seguridad y base de datos.
-2. **Duplicación de capacidades:** Carpetas `.agents/skills` copiadas manualmente entre repositorios, desfasadas y difíciles de mantener.
-3. **Falta de composabilidad:** Para combinar frontend y base de datos, los desarrolladores se veían obligados a crear archivos redundantes.
+1. **Reglas monolíticas:** Archivos `AGENTS.md` extensos que mezclan directivas de frontend, backend, seguridad y base de datos.
+2. **Duplicación de capacidades:** Carpetas `.agents/skills` copiadas manualmente entre repositorios y difíciles de mantener.
+3. **Falta de composabilidad:** Dificultad para combinar herramientas especializadas sin duplicar definiciones.
 
 ### La Solución de gz-ia: Toolkits Atómicos y Perfiles Emergentes
 - **El Toolkit como Unidad Atómica:** Un paquete modular, reutilizable y autónomo que agrupa directivas maestras (`AGENTS.md`), reglas arquitectónicas (`rules/`), habilidades procedimentales (`skills/`), y herramientas ejecutables MCP (`tools.json` / `tools/`) protegidas por un Circuit Breaker.
-- **El Perfil como Composición Emergente:** Un "perfil" no es un archivo estático en el disco ni una plantilla rígida. Es la **suma activa y coherente de uno o más toolkits** elegidos para una sesión de trabajo específica. Puede surgir al vuelo pasando banderas en la CLI (`-T react -T postgres`), seleccionándolos en la TUI, o declarando un **Preset** conveniente en `config.json`.
-- **Aislamiento en Git:** Tu rama base no se modifica mientras el agente trabaja. Todo el tooling se proyecta dinámicamente mediante enlaces simbólicos y síntesis en caliente dentro del worktree de la sesión (`.harness/worktrees/<id>`).
+- **El Perfil como Composición Emergente:** Un perfil es la **suma de uno o más toolkits** elegidos para una sesión de trabajo específica. Puede definirse pasando banderas en la CLI (`-T react -T postgres`), seleccionándolos en la TUI, o declarando un **Preset** en `config.json`.
+- **Aislamiento en Git:** Tu rama base no se modifica mientras el agente trabaja. Todo el tooling se proyecta dinámicamente mediante enlaces simbólicos y síntesis dentro del worktree de la sesión (`.harness/worktrees/<id>`).
 
 ---
 
 ## <span id="anatomia-de-un-toolkit-modular"></span>2. Anatomía de un Toolkit Modular
 
 Cada toolkit vive en su propio directorio. Según el alcance deseado, se ubica en:
-1. **Catálogo de proyecto versionado en Git (Recomendado para equipos):** `.gz-ia/toolkits/<id>` o `toolkits/<id>`. Al no estar dentro de `.harness/`, viaja con el repositorio en Git y está disponible para todos tus compañeros de equipo.
-2. **Catálogo de proyecto local (Efímero / Personal):** `.harness/toolkits/<id>`. Excluido de Git mediante `.git/info/exclude`, ideal para pruebas locales que no deseas compartir.
-3. **Catálogo global de usuario:** `~/.config/gz-ia/tooling/toolkits/<id>`. Accesible desde cualquier proyecto en tu máquina.
+1. **Catálogo de proyecto versionado en Git (Recomendado para equipos):** `.gz-ia/toolkits/<id>` o `toolkits/<id>`. Al no estar dentro de `.harness/`, viaja con el repositorio en Git y está disponible para todos los colaboradores del repositorio.
+2. **Catálogo de proyecto local (Efímero / Personal):** `.harness/toolkits/<id>`. Excluido de Git mediante `.git/info/exclude`, para pruebas locales no compartidas.
+3. **Catálogo global de usuario:** `~/.config/gz-ia/tooling/toolkits/<id>`. Accesible desde cualquier proyecto en la máquina.
 
 ```text
 .gz-ia/toolkits/toolkit-frontend/         (o ~/.config/gz-ia/tooling/toolkits/...)
@@ -48,14 +48,14 @@ Cada toolkit vive en su propio directorio. Según el alcance deseado, se ubica e
 1. **Directivas Maestras (`AGENTS.md`):**
    Instrucciones operativas de alto nivel del toolkit. Se proyectan y sintetizan en el `AGENTS.md` maestro de la sesión.
 2. **Reglas de Arquitectura (`rules/*.md`):**
-   Documentos específicos y concisos sobre convenciones técnicas, linters o estándares de diseño. Se copian al worktree para consulta inmediata del agente sin colisiones de nombres.
+   Documentos específicos sobre convenciones técnicas, linters o estándares de diseño. Se copian al worktree para consulta del agente.
 3. **Habilidades Procedimentales (`skills/<nombre>/SKILL.md`):**
    Flujos paso a paso que el agente de IA consulta bajo demanda para tareas especializadas (ej. despliegues, pruebas E2E, migraciones de base de datos).
 4. **Herramientas con Circuit Breaker (`tools.json`):**
    Herramientas ejecutables expuestas al agente mediante el protocolo JSON-RPC 2.0 a través del microkernel Orchy. Cada herramienta cuenta con protección de salud de tres estados:
    - `HEALTHY`: Operación normal.
    - `DEGRADED`: Fallos transitorios o advertencias detectadas.
-   - `DEAD`: Fallos continuos o timeouts excedidos; el arnés aísla la falla e informa honestamente al agente sin bloquear su flujo de trabajo.
+   - `DEAD`: Fallos continuos o timeouts excedidos; el arnés aísla la falla y notifica el error al agente sin interrumpir el proceso principal.
 5. **Descriptor de Metadatos (`toolkit.json`):**
    Define el identificador, descripción, variables de entorno requeridas y servidores MCP complementarios.
 

@@ -94,7 +94,7 @@ El núcleo operativo de la CLI de `gz-ia`, completamente desacoplado de la termi
 Un paquete autónomo y reutilizable ubicado en `packages/orchy` que provee:
 
 - **Inversión de Control (IoC):** `ServiceContainer` y `KernelContext` para registrar dependencias desacopladas.
-- **Honest Microkernel & Circuit Breaker:** Supervisa el estado de salud de cada herramienta registrada (`HEALTHY`, `DEGRADED`, `DEAD`) mediante `ToolProxy` para garantizar aislamiento de fallos en memoria sin detener el proceso.
+- **Microkernel & Circuit Breaker:** Supervisa el estado de salud de cada herramienta registrada (`HEALTHY`, `DEGRADED`, `DEAD`) mediante `ToolProxy` para aislar fallos en memoria sin detener el proceso.
 - **Servidor MCP Nativo:** Exposición de herramientas a cualquier agente compatible con el protocolo MCP (Model Context Protocol) a través de canales estándar (`io.Reader` / `io.Writer`).
 - **Baterías Incluidas:** Plugins de worktrees para inspección segura (`worktree_read` expuesta a agentes por defecto) e integración controlada (`worktree_get`).
 

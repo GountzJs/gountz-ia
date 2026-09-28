@@ -452,7 +452,7 @@ flowchart TD
 
 ### Reemplazo Atómico de Binarios (Solución al `ETXTBSY` de Linux)
 
-En los kernels de GNU/Linux, escribir directamente sobre un archivo ejecutable que está actualmente en ejecución genera el error `ETXTBSY` (*Text file busy*). Para garantizar una actualización 100% libre de errores:
+En los kernels de GNU/Linux, escribir directamente sobre un archivo ejecutable en ejecución genera el error `ETXTBSY` (*Text file busy*). Para evitarlo, se aplica un reemplazo atómico:
 
 ```go
 // 1. Crear archivo temporal en el mismo sistema de archivos/directorio
