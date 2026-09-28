@@ -280,10 +280,30 @@ func TestToolingService_ComposeAndProject(t *testing.T) {
 		t.Errorf("masterContent no documenta session_log ni worktree_read: %s", masterContent)
 	}
 
-	// Validar que las reglas fueron proyectadas en .agents/rules/
+	// Validar que el mandato imperativo del orquestador está incrustado en el encabezado
+	if !strings.Contains(masterContent, "Mandato Imperativo de Gobernanza del Agente Orquestador") {
+		t.Errorf("masterContent no contiene el mandato imperativo de gobernanza: %s", masterContent)
+	}
+	if !strings.Contains(masterContent, "invoke_subagent") || !strings.Contains(masterContent, "ask_question") {
+		t.Errorf("masterContent no contiene reglas operativas obligatorias de subagentes y ask_question: %s", masterContent)
+	}
+	if !strings.Contains(masterContent, "Architecture & Research Analyst") || !strings.Contains(masterContent, "Core Engineer / Implementer") {
+		t.Errorf("masterContent no contiene la tabla de roles de subagentes: %s", masterContent)
+	}
+
+	// Validar que las reglas fueron proyectadas en .agents/rules/ con frontmatter YAML válido
 	ruleAPath := filepath.Join(targetWorktreeDir, ".agents", "rules", "rule-a.md")
 	if _, err := os.Stat(ruleAPath); os.IsNotExist(err) {
 		t.Errorf("Regla rule-a.md no fue proyectada en .agents/rules/")
+	} else {
+		data, err := os.ReadFile(ruleAPath)
+		if err != nil {
+			t.Fatalf("Error leyendo rule-a.md proyectada: %v", err)
+		}
+		ruleContent := string(data)
+		if !strings.Contains(ruleContent, "trigger: always_on") || !strings.Contains(ruleContent, "globs: \"**/*\"") {
+			t.Errorf("rule-a.md no tiene frontmatter YAML con trigger y globs: %s", ruleContent)
+		}
 	}
 
 	// Validar que las skills fueron proyectadas en .agents/skills/
@@ -766,5 +786,88 @@ func TestToolingService_Unproject(t *testing.T) {
 	// 6. Archivo no relacionado no fue tocado
 	if mainBytes, err := os.ReadFile(filepath.Join(targetDir, "main.go")); err != nil || string(mainBytes) != "package main\n" {
 		t.Errorf("main.go fue alterado o borrado inesperadamente")
+	}
+}
+
+func TestEnsureRuleFrontmatter(t *testing.T) {
+	// Caso 1: Archivo sin ningún frontmatter
+	rawNoFM := []byte("# Regla de Arquitectura y Limpieza\n\nDetalle normativo...")
+	res1 := ensureRuleFrontmatter(rawNoFM, "arch-clean.md")
+	resStr1 := string(res1)
+	if !strings.HasPrefix(resStr1, "---\n") {
+		t.Errorf("Se esperaba que res1 comenzara con frontmatter YAML: %s", resStr1)
+	}
+	if !strings.Contains(resStr1, "description: \"Regla de Arquitectura y Limpieza\"") {
+		t.Errorf("Descripción inferida no encontrada en res1: %s", resStr1)
+	}
+	if !strings.Contains(resStr1, "trigger: always_on") || !strings.Contains(resStr1, "globs: \"**/*\"") {
+		t.Errorf("trigger: always_on o globs no encontrados en res1: %s", resStr1)
+	}
+	if !strings.Contains(resStr1, "# Regla de Arquitectura y Limpieza") {
+		t.Errorf("El contenido original no se conservó en res1: %s", resStr1)
+	}
+
+	// Caso 2: Archivo con frontmatter que carece de trigger
+	rawIncompleteFM := []byte("---\ndescription: \"Regla existente\"\n---\n\n# Titulo\n")
+	res2 := ensureRuleFrontmatter(rawIncompleteFM, "existing.md")
+	resStr2 := string(res2)
+	if !strings.Contains(resStr2, "trigger: always_on") {
+		t.Errorf("trigger: always_on no fue inyectado en frontmatter existente: %s", resStr2)
+	}
+	if !strings.Contains(resStr2, "globs: \"**/*\"") {
+		t.Errorf("globs: \"**/*\" no fue inyectado en frontmatter existente: %s", resStr2)
+	}
+	if !strings.Contains(resStr2, "description: \"Regla existente\"") {
+		t.Errorf("description original no se preservó en res2: %s", resStr2)
+	}
+
+	// Caso 3: Archivo que ya posee frontmatter válido con trigger
+	rawValidFM := []byte("---\ndescription: \"Regla completa\"\nglobs: \"**/*\"\ntrigger: always_on\n---\n\n# Titulo\n")
+	res3 := ensureRuleFrontmatter(rawValidFM, "valid.md")
+	if string(res3) != string(rawValidFM) {
+		t.Errorf("El contenido válido no debió ser modificado: %s", string(res3))
+	}
+}
+
+func TestGenerateMasterAgentsMarkdown(t *testing.T) {
+	composed := &ComposedTooling{
+		ActiveToolkits: []string{"toolkit-gz-ia"},
+		AgentsFiles: map[string]string{
+			"TOOLKIT_GZ_IA-AGENTS.md": "/tmp/TOOLKIT_GZ_IA-AGENTS.md",
+		},
+		RulesFiles: map[string]string{
+			"01-orchestrator-governance.md": "/tmp/01-orchestrator-governance.md",
+		},
+		Tools: []DeclaredTool{
+			{Name: "custom_tool", Description: "Herramienta personalizada"},
+		},
+	}
+
+	sessID := "test_master_agents_gen"
+	out := generateMasterAgentsMarkdown(composed, sessID)
+
+	expectedSnippets := []string{
+		"# Directivas Unificadas de Sesión Agéntica — Gountz IA",
+		"**Sesión ID:** `test_master_agents_gen`",
+		"## Mandato Imperativo de Gobernanza del Agente Orquestador",
+		"Preservación del Contexto Principal",
+		"Prohibición de Edición Directa Masiva",
+		"Delegación Sistemática a Subagentes (`invoke_subagent`)",
+		"Cero Cuestionarios Pasivos (`ask_question`)",
+		"Architecture & Research Analyst",
+		"Core Engineer / Implementer",
+		"QA & Test Specialist",
+		"Technical Documentation Specialist",
+		"session_log",
+		"worktree_read",
+		"custom_tool",
+		"01-orchestrator-governance.md",
+		"TOOLKIT_GZ_IA-AGENTS.md",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(out, snippet) {
+			t.Errorf("generateMasterAgentsMarkdown no contiene fragmento esperado: %q", snippet)
+		}
 	}
 }

@@ -401,14 +401,15 @@ func (s *toolingService) ProjectIntoWorktree(ctx context.Context, targetDir stri
 					manifest.CreatedFiles = append(manifest.CreatedFiles, relPath)
 				}
 			}
-			if err := copyFile(srcPath, dstPath); err != nil {
-				return fmt.Errorf("error copiando regla %s: %w", ruleFilename, err)
-			}
-			data, err := os.ReadFile(dstPath)
+			srcData, err := os.ReadFile(srcPath)
 			if err != nil {
-				return fmt.Errorf("error leyendo regla proyectada %s: %w", ruleFilename, err)
+				return fmt.Errorf("error leyendo regla origen %s: %w", srcPath, err)
 			}
-			manifest.ProjectedHash[relPath] = workspace.HashBytes(data)
+			finalData := ensureRuleFrontmatter(srcData, ruleFilename)
+			if err := os.WriteFile(dstPath, finalData, 0644); err != nil {
+				return fmt.Errorf("error escribiendo regla %s: %w", ruleFilename, err)
+			}
+			manifest.ProjectedHash[relPath] = workspace.HashBytes(finalData)
 		}
 	}
 
@@ -472,7 +473,7 @@ func (s *toolingService) ProjectIntoWorktree(ctx context.Context, targetDir stri
 
 	var fullContent string
 	if hasOriginal && strings.TrimSpace(origContent) != "" {
-		fullContent = fmt.Sprintf("# Reglas Originales del Proyecto\n\n%s\n\n---\n\n%s", strings.TrimSpace(origContent), masterContent)
+		fullContent = fmt.Sprintf("%s\n\n---\n\n# Reglas Originales del Proyecto\n\n%s\n", masterContent, strings.TrimSpace(origContent))
 	} else {
 		fullContent = masterContent
 	}
@@ -626,6 +627,25 @@ func generateMasterAgentsMarkdown(composed *ComposedTooling, sessionID string) s
 	sb.WriteString("# Directivas Unificadas de Sesión Agéntica — Gountz IA\n\n")
 	sb.WriteString(fmt.Sprintf("> **Sesión ID:** `%s` | **Toolkits Activos:** `%s`\n\n", sessionID, strings.Join(composed.ActiveToolkits, ", ")))
 
+	sb.WriteString("## Mandato Imperativo de Gobernanza del Agente Orquestador\n\n")
+	sb.WriteString("El agente que opera en este hilo principal asume exclusiva y estrictamente el rol de **Director Técnico y Agente Orquestador**.\n")
+	sb.WriteString("Su prioridad absoluta es la gobernanza estratégica, la planificación, la descomposición de requerimientos y la preservación estricta de la ventana de contexto.\n\n")
+
+	sb.WriteString("### Reglas Operativas de Obligatorio Cumplimiento:\n")
+	sb.WriteString("1. **Preservación del Contexto Principal:** Prohibido realizar lecturas masivas de archivos, emitir logs verbosos o ejecutar secuencias largas de comandos en este hilo principal.\n")
+	sb.WriteString("2. **Prohibición de Edición Directa Masiva:** Queda terminantemente prohibido escribir código masivo, editar o refactorizar archivos directamente en este contexto principal.\n")
+	sb.WriteString("3. **Delegación Sistemática a Subagentes (`invoke_subagent`):** Toda tarea operativa, análisis exploratorio de código, implementación de features, modificación de archivos o ejecución de pruebas debe delegarse obligatoriamente a subagentes especializados.\n")
+	sb.WriteString("4. **Cero Cuestionarios Pasivos (`ask_question`):** Prohibido formular cuestionarios pasivos al usuario para evadir el análisis técnico. El orquestador debe investigar proactivamente mediante subagentes de investigación (`research`) y presentar propuestas técnicas concretas y ejecutables.\n")
+	sb.WriteString("5. **Observabilidad y Trazabilidad:** Notificar hitos de progreso (READ, PENDING, FINISH) mediante la herramienta `session_log` y comunicar conclusiones al usuario de forma concisa con enlaces cliqueables (`file://`).\n\n")
+
+	sb.WriteString("### Catálogo y Roles de Subagentes Especializados:\n\n")
+	sb.WriteString("| Rol de Subagente | TypeName | Responsabilidad Principal | Cuándo Invocar |\n")
+	sb.WriteString("| :--- | :--- | :--- | :--- |\n")
+	sb.WriteString("| **Architecture & Research Analyst** | `research` / `self` | Exploración de repositorios externos, benchmarking, diseño de arquitectura y evaluación de dependencias. | Para analizar herramientas externas o planificar cambios arquitectónicos antes de codificar. |\n")
+	sb.WriteString("| **Core Engineer / Implementer** | `self` | Implementación de features en Go/código, refactorización y resolución de bugs. | Para escribir código de producción, comandos de CLI y módulos de negocio. |\n")
+	sb.WriteString("| **QA & Test Specialist** | `self` | Diseño e implementación de suites de pruebas unitarias, mocks y tests de integración. | Para alcanzar cobertura de testing o validar casos borde complejos. |\n")
+	sb.WriteString("| **Technical Documentation Specialist** | `self` | Redacción de documentación y especificaciones técnicas (`docs/`, `README.md`, diagramas Mermaid). | Para generar o sincronizar documentación tras la implementación. |\n\n")
+
 	if len(composed.AgentsFiles) > 0 {
 		sb.WriteString("## Directivas de Dominio y Toolkits\n")
 		sb.WriteString("Esta sesión integra los siguientes paquetes de directivas. Consulta y acata las guías de cada archivo:\n\n")
@@ -659,6 +679,54 @@ func generateMasterAgentsMarkdown(composed *ComposedTooling, sessionID string) s
 	sb.WriteString("\n")
 
 	return sb.String()
+}
+
+// ensureRuleFrontmatter comprueba si una regla Markdown cuenta con el frontmatter YAML
+// requerido por Antigravity (trigger: always_on). Si no lo contiene, lo inyecta automáticamente.
+func ensureRuleFrontmatter(data []byte, filename string) []byte {
+	str := string(data)
+	trimmed := strings.TrimSpace(str)
+
+	if strings.HasPrefix(trimmed, "---") {
+		rest := trimmed[3:]
+		idx := strings.Index(rest, "---")
+		if idx != -1 {
+			frontmatter := rest[:idx]
+			if strings.Contains(frontmatter, "trigger:") {
+				return data
+			}
+			var extra strings.Builder
+			if !strings.Contains(frontmatter, "globs:") {
+				extra.WriteString("globs: \"**/*\"\n")
+			}
+			extra.WriteString("trigger: always_on\n")
+
+			newFM := frontmatter
+			if !strings.HasSuffix(newFM, "\n") {
+				newFM += "\n"
+			}
+			newFM += extra.String()
+			return []byte("---\n" + strings.TrimLeft(newFM, "\r\n") + rest[idx:])
+		}
+	}
+
+	// Infiere la descripción desde el primer encabezado '# ' o usa el nombre del archivo
+	desc := strings.TrimSuffix(filename, filepath.Ext(filename))
+	lines := strings.Split(str, "\n")
+	for _, l := range lines {
+		lTrim := strings.TrimSpace(l)
+		if strings.HasPrefix(lTrim, "# ") {
+			title := strings.TrimSpace(strings.TrimPrefix(lTrim, "# "))
+			if title != "" {
+				desc = title
+				break
+			}
+		}
+	}
+	desc = strings.ReplaceAll(desc, "\"", "\\\"")
+
+	header := fmt.Sprintf("---\ndescription: \"%s\"\nglobs: \"**/*\"\ntrigger: always_on\n---\n\n", desc)
+	return append([]byte(header), data...)
 }
 
 func copyFile(src, dst string) error {

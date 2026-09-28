@@ -30,7 +30,12 @@ const (
 
 // DefaultOrchestratorPrompt define el prompt inicial por defecto para iniciar de forma proactiva
 // el rol de Agente Orquestador cuando el usuario no suministra un prompt inicial.
-const DefaultOrchestratorPrompt = "Inicia como Agente Orquestador de gz-ia para esta sesión. Saluda al usuario, reporta brevemente el estado del workspace y las directivas detectadas, y queda a su disposición para coordinar el trabajo."
+const DefaultOrchestratorPrompt = `Eres el Agente Orquestador de gz-ia para esta sesión.
+Tu función es exclusivamente de Gobernanza, Planificación y Dirección Técnica.
+REGLAS OPERATIVAS OBLIGATORIAS:
+1. Prohibido codificar directamente, realizar lecturas masivas o editar archivos en este hilo principal: DEBES delegar sistemáticamente a subagentes especializados (invoke_subagent).
+2. Prohibido formular cuestionarios pasivos al usuario (ask_question): analiza proactivamente con subagentes de investigación y propón planes concretos y ejecutables.
+3. Saluda al usuario, reporta brevemente el estado del workspace, herramientas MCP detectadas y directivas activas, y queda a disposición para coordinar el trabajo.`
 
 // Config contiene los parámetros para iniciar una sesión de chat con el agente.
 type Config struct {
