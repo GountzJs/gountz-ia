@@ -286,6 +286,8 @@ func (u *updaterService) Update(ctx context.Context, targetVer string, installDi
 	var checksumsURL string
 	var verToInstall string
 
+	var tag string
+	var archiveName string
 	if targetVer == "" {
 		info, err := u.CheckLatest(ctx)
 		if err != nil {
@@ -296,16 +298,23 @@ func (u *updaterService) Update(ctx context.Context, targetVer string, installDi
 		checksumsURL = info.ChecksumsURL
 	} else {
 		verToInstall = NormalizeVersion(targetVer)
-		tag := "v" + verToInstall
-		goos := runtime.GOOS
-		goarch := runtime.GOARCH
-		archiveExt := ".tar.gz"
-		if goos == "windows" {
-			archiveExt = ".zip"
+		info, err := u.CheckLatest(ctx)
+		if err == nil && info != nil && NormalizeVersion(info.Version) == verToInstall && info.DownloadURL != "" {
+			downloadURL = info.DownloadURL
+			checksumsURL = info.ChecksumsURL
+			tag = info.Tag
+		} else {
+			tag = "v" + verToInstall
+			goos := runtime.GOOS
+			goarch := runtime.GOARCH
+			archiveExt := ".tar.gz"
+			if goos == "windows" {
+				archiveExt = ".zip"
+			}
+			archiveName = fmt.Sprintf("gz-ia_%s_%s_%s%s", verToInstall, goos, goarch, archiveExt)
+			downloadURL = fmt.Sprintf("%s/%s/%s", strings.TrimRight(u.cfg.DownloadBaseURL, "/"), tag, archiveName)
+			checksumsURL = fmt.Sprintf("%s/%s/checksums.txt", strings.TrimRight(u.cfg.DownloadBaseURL, "/"), tag)
 		}
-		archiveName := fmt.Sprintf("gz-ia_%s_%s_%s%s", verToInstall, goos, goarch, archiveExt)
-		downloadURL = fmt.Sprintf("%s/%s/%s", strings.TrimRight(u.cfg.DownloadBaseURL, "/"), tag, archiveName)
-		checksumsURL = fmt.Sprintf("%s/%s/checksums.txt", strings.TrimRight(u.cfg.DownloadBaseURL, "/"), tag)
 	}
 
 	goarch := runtime.GOARCH
@@ -323,6 +332,29 @@ func (u *updaterService) Update(ctx context.Context, targetVer string, installDi
 	if err != nil {
 		return nil, fmt.Errorf("error descargando paquete desde GitHub Releases (%s): %w", downloadURL, err)
 	}
+
+	// Si retornó 404 y se especificó targetVer, intentar fallback alternando el prefijo 'v'
+	if resp.StatusCode == http.StatusNotFound && targetVer != "" {
+		_ = resp.Body.Close()
+		altTag := verToInstall
+		if strings.HasPrefix(tag, "v") {
+			altTag = verToInstall
+		} else {
+			altTag = "v" + verToInstall
+		}
+		altURL := fmt.Sprintf("%s/%s/%s", strings.TrimRight(u.cfg.DownloadBaseURL, "/"), altTag, archiveName)
+		if altReq, aErr := http.NewRequestWithContext(ctx, http.MethodGet, altURL, nil); aErr == nil {
+			altReq.Header.Set("User-Agent", "gz-ia-updater")
+			if altResp, doErr := u.httpClient.Do(altReq); doErr == nil {
+				resp = altResp
+				if resp.StatusCode == http.StatusOK {
+					downloadURL = altURL
+					checksumsURL = fmt.Sprintf("%s/%s/checksums.txt", strings.TrimRight(u.cfg.DownloadBaseURL, "/"), altTag)
+				}
+			}
+		}
+	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -334,7 +366,7 @@ func (u *updaterService) Update(ctx context.Context, targetVer string, installDi
 		return nil, fmt.Errorf("error leyendo contenido del paquete: %w", err)
 	}
 
-	archiveName := filepath.Base(downloadURL)
+	archiveName = filepath.Base(downloadURL)
 
 	// Verificación de integridad SHA-256 contra checksums.txt si está presente
 	if checksumsURL != "" {
