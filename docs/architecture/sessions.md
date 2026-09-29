@@ -41,6 +41,7 @@ Toda la metadata de la sesión se almacena de forma persistente y atómica en fo
 ```json
 {
   "id": "3f9a12c8",
+  "conversation_id": "conv-8f7a9b0c-1234-5678-9abc-def012345678",
   "provider": "agy",
   "permission": "supervised",
   "status": "COMPLETED",
@@ -60,6 +61,36 @@ Toda la metadata de la sesión se almacena de forma persistente y atómica en fo
 ### Escritura Atómica
 
 Para evitar corrupción de datos en caso de caídas del proceso o interrupciones del sistema, `gz-ia` escribe los registros primero en un archivo temporal (`.harness/sessions/<id>.json.tmp`) y luego realiza una sustitución atómica (`os.Rename`), manteniendo la consistencia en disco.
+
+---
+
+## Observabilidad, Cierre Garantizado y Manifiesto Dinámico
+
+`gz-ia` implementa mecanismos automáticos y resilientes para garantizar el cierre ordenado de sesiones, la captura de telemetría y la auditoría de cambios en el espacio de trabajo.
+
+### Persistencia de `conversation_id` y Cierre Garantizado (`defer`)
+
+Cada sesión almacena y recupera de forma persistente el `conversation_id` asignado por el motor agéntico nativo (por ejemplo, Google Antigravity). Para asegurar que el ciclo de vida finalice de forma consistente ante cualquier escenario de término (éxito, error de proceso, pánico en tiempo de ejecución o interrupción):
+
+- **Bloque de Cierre `defer`:** Se ejecuta incondicionalmente al salir de `Session.Start`.
+- **Registro Seguro de Métricas:** Almacena de forma garantizada los campos `FinishedAt`, `DurationMs`, `ExitCode` y el estado final (`COMPLETED` o `FAILED`) en el `SessionRecord`.
+- **Evento de Cierre (`StageFinish`):** Emite el evento de observabilidad `logger.StageFinish` en `.harness/sessions/<id>.events.jsonl` registrando la acción (`Sesión finalizada exitosamente` o `Sesión finalizada con fallas`), el código de salida, la duración total en segundos y el resumen diff de archivos modificados (`files_changed`).
+
+### Sincronización Automática de Telemetría (`SyncTelemetry`)
+
+Durante la fase de cierre garantizado, `gz-ia` ejecuta `SyncTelemetry` para consolidar las trazas de ejecución del agente en el registro de observabilidad del arnés:
+
+- **Localización de Trazas:** Inspecciona la estructura del motor agéntico nativo (`~/.gemini/antigravity-cli/brain/<conversation_id>/.system_generated/logs/transcript.jsonl`) resolviendo el `conversation_id` asociado.
+- **Sincronización de Tool Calls y Subagentes:** Parsea los pasos (`PlannerResponseStep`) e identifica llamadas a herramientas (`tool_calls`) e invocación de subagentes (`invoke_subagent`).
+- **Mapeo a Eventos (`events.jsonl`):** Mapea cada invocación a un evento estructurado en `.harness/sessions/<id>.events.jsonl` con claves únicas de evento (`event_key`) para garantizar idempotencia. Clasifica las etapas entre lecturas (`StageRead` para `view_file`, `search_web`, `read_url_content`, `read_browser_page`, etc.) y ejecuciones (`StagePending`).
+
+### Auditoría y Actualización Dinámica del Manifiesto Delta (`UpdateManifestDelta`)
+
+Para mantener el manifiesto del espacio de trabajo (`.harness/manifest.json`) sincronizado con las mutaciones reales realizadas durante la sesión:
+
+- **Auditoría Porcelain:** Invoca `workspace.UpdateManifestDelta(manifestPath, worktreeDir)`, ejecutando `git status --porcelain` sobre el directorio del worktree.
+- **Detección de Archivos Creados y Modificados:** Clasifica los archivos detectados (`?`, `A`, etc.), agregando los nuevos archivos a `CreatedFiles` sin duplicados.
+- **Recálculo de Hashes Proyectados:** Calcula y actualiza los checksums SHA-256 (`ProjectedHash`) para todos los archivos alterados o creados en el manifiesto JSON.
 
 ---
 

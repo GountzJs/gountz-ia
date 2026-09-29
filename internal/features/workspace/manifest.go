@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // Manifest registra con exactitud qué archivos fueron creados o modificados
@@ -77,3 +79,73 @@ func LoadManifest(baseDir string, sessionID string) (*Manifest, error) {
 	}
 	return &m, nil
 }
+
+// UpdateManifestDelta audita mediante `git status --porcelain` el delta del worktree
+// (archivos creados o modificados) y actualiza manifest.json en manifestPath.
+func UpdateManifestDelta(manifestPath string, worktreeDir string) error {
+	if worktreeDir == "" || manifestPath == "" {
+		return nil
+	}
+
+	var m Manifest
+	if data, err := os.ReadFile(manifestPath); err == nil {
+		_ = json.Unmarshal(data, &m)
+	}
+	if m.CreatedFiles == nil {
+		m.CreatedFiles = []string{}
+	}
+	if m.OriginalFiles == nil {
+		m.OriginalFiles = make(map[string]string)
+	}
+	if m.ProjectedHash == nil {
+		m.ProjectedHash = make(map[string]string)
+	}
+
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = worktreeDir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	createdMap := make(map[string]bool)
+	for _, f := range m.CreatedFiles {
+		createdMap[f] = true
+	}
+
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		line = strings.TrimRight(line, "\r")
+		if len(line) < 4 {
+			continue
+		}
+		status := line[:2]
+		relPath := strings.TrimSpace(line[3:])
+		if strings.HasPrefix(relPath, "\"") && strings.HasSuffix(relPath, "\"") {
+			relPath = strings.Trim(relPath, "\"")
+		}
+
+		isCreated := strings.Contains(status, "?") || strings.Contains(status, "A")
+		if isCreated {
+			if !createdMap[relPath] {
+				createdMap[relPath] = true
+				m.CreatedFiles = append(m.CreatedFiles, relPath)
+			}
+		}
+
+		fullPath := filepath.Join(worktreeDir, relPath)
+		if data, err := os.ReadFile(fullPath); err == nil {
+			m.ProjectedHash[relPath] = HashBytes(data)
+		}
+	}
+
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(manifestPath, data, 0644)
+}
+

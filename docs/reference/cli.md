@@ -271,10 +271,10 @@ gz-ia session context <session-id> [flags]
 - `-d, --dir <ruta>`: Directorio del proyecto.
 
 **Contenido del contexto:**
-- Metadatos de la sesión: ID, proveedor, rama, toolkits, prompt inicial y estado.
-- Métricas temporales: fecha de inicio, finalización y duración en milisegundos.
-- Historial de eventos de observabilidad (`.events.jsonl`): acciones, etapas (`READ`, `PENDING`, `FINISH`), duraciones y estados.
-- Diff de archivos modificados y creados durante la sesión.
+- Metadatos de la sesión: ID, `conversation_id` (persistido del proveedor agéntico), proveedor, rama, toolkits, prompt inicial y estado.
+- Métricas temporales: fecha de inicio, finalización (`FinishedAt`) y duración en milisegundos (`DurationMs`) garantizadas por `defer`.
+- Historial de eventos de observabilidad (`.events.jsonl`): acciones, etapas (`READ`, `PENDING`, `FINISH`), duraciones, estados y eventos de telemetría sincronizados automáticamente de `transcript.jsonl` (`SyncTelemetry`).
+- Auditoría delta de archivos modificados y creados en el worktree (`UpdateManifestDelta` en `manifest.json`).
 
 **Ejemplos:**
 ```bash
@@ -321,6 +321,11 @@ Visualiza o transmite el flujo de eventos de la sesión.
 ```bash
 gz-ia session logs <session-id> [-f, --follow] [--json]
 ```
+
+Los eventos consultados provienen de `.harness/sessions/<id>.events.jsonl` e incluyen:
+1. **Eventos manuales/directos:** Registrados vía `session log` o por la TUI/orquestador.
+2. **Eventos de telemetría sincronizada (`SyncTelemetry`):** Extraídos de `transcript.jsonl` (llamadas a herramientas y subagentes invocados).
+3. **Evento de Cierre Garantizado (`StageFinish`):** Generado por el bloque `defer` al finalizar la sesión con `exit_code`, `duration_s` y el diff de archivos modificados.
 
 ---
 

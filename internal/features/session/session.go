@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"gz-ia/internal/features/logger"
+	"gz-ia/internal/features/metrics"
 	"gz-ia/internal/features/tooling"
 	"gz-ia/internal/features/vault"
 	"gz-ia/internal/features/workspace"
@@ -402,66 +403,231 @@ func (s *Session) Start(ctx context.Context) error {
 		}
 	}
 
-	exitCode, runErr := s.Runner.Run(ctx, binary, args, ws.TargetDir, onStart)
+	var runErr error
+	var exitCode int
 
-	// Comprobar si fue marcada como killed externamente
-	if latest, getErr := s.Store.Get(s.Config.ID); getErr == nil && latest != nil {
-		if latest.Status == StatusKilled {
-			return runErr
-		}
-	}
-
-	endTime := time.Now()
-	record.FinishedAt = &endTime
-	record.DurationMs = endTime.Sub(startTime).Milliseconds()
-	record.ExitCode = exitCode
-
-	if runErr != nil {
-		record.Status = StatusFailed
-	} else {
-		record.Status = StatusCompleted
-	}
-
-	_ = s.Store.Save(record)
-
-	if s.Logger != nil {
-		dur := record.DurationMs
-		finishMeta := map[string]any{
-			"exit_code":  exitCode,
-			"duration_s": record.DurationMs / 1000,
-		}
-		if s.Workspace != nil {
-			if diff, diffErr := s.Workspace.DiffWorktree(ctx, record.WorkingDir, record.WorktreeDir, record.BranchName, true); diffErr == nil && diff != "" {
-				finishMeta["files_changed"] = diff
+	defer func() {
+		if r := recover(); r != nil {
+			if runErr == nil {
+				runErr = fmt.Errorf("panic durante la ejecución de la sesión: %v", r)
 			}
 		}
-		if runErr != nil {
-			st := logger.StatusFailed
-			_ = s.Logger.Emit(ctx, &logger.Event{
-				SessionID:  s.Config.ID,
-				AgentID:    "orchestrator",
-				Role:       "orchestrator",
-				Action:     "Sesión finalizada con fallas",
-				Stage:      logger.StageFinish,
-				Status:     &st,
-				DurationMs: &dur,
-				Error:      runErr.Error(),
-				Metadata:   finishMeta,
-			})
-		} else {
-			st := logger.StatusOK
-			_ = s.Logger.Emit(ctx, &logger.Event{
-				SessionID:  s.Config.ID,
-				AgentID:    "orchestrator",
-				Role:       "orchestrator",
-				Action:     "Sesión finalizada exitosamente",
-				Stage:      logger.StageFinish,
-				Status:     &st,
-				DurationMs: &dur,
-				Metadata:   finishMeta,
-			})
+
+		// Comprobar si fue marcada como killed externamente
+		isKilled := false
+		if latest, getErr := s.Store.Get(s.Config.ID); getErr == nil && latest != nil {
+			if latest.Status == StatusKilled {
+				isKilled = true
+			}
+		}
+
+		if !isKilled {
+			endTime := time.Now()
+			record.FinishedAt = &endTime
+			record.DurationMs = endTime.Sub(startTime).Milliseconds()
+			record.ExitCode = exitCode
+
+			if runErr != nil {
+				record.Status = StatusFailed
+			} else {
+				record.Status = StatusCompleted
+			}
+		}
+
+		// Fase 2: Buscar ConversationID y sincronizar telemetría a events.jsonl
+		_ = s.SyncTelemetry(ctx, record)
+
+		// Fase 3: Actualizar manifiesto dinámico delta
+		if ws != nil && ws.TargetDir != "" {
+			manifestPath := workspace.ManifestPath(record.WorkingDir, record.ID)
+			_ = workspace.UpdateManifestDelta(manifestPath, ws.TargetDir)
+		}
+
+		_ = s.Store.Save(record)
+
+		if s.Logger != nil && !isKilled {
+			dur := record.DurationMs
+			finishMeta := map[string]any{
+				"exit_code":  exitCode,
+				"duration_s": record.DurationMs / 1000,
+			}
+			if s.Workspace != nil {
+				if diff, diffErr := s.Workspace.DiffWorktree(ctx, record.WorkingDir, record.WorktreeDir, record.BranchName, true); diffErr == nil && diff != "" {
+					finishMeta["files_changed"] = diff
+				}
+			}
+			if runErr != nil {
+				st := logger.StatusFailed
+				_ = s.Logger.Emit(ctx, &logger.Event{
+					SessionID:  s.Config.ID,
+					AgentID:    "orchestrator",
+					Role:       "orchestrator",
+					Action:     "Sesión finalizada con fallas",
+					Stage:      logger.StageFinish,
+					Status:     &st,
+					DurationMs: &dur,
+					Error:      runErr.Error(),
+					Metadata:   finishMeta,
+				})
+			} else {
+				st := logger.StatusOK
+				_ = s.Logger.Emit(ctx, &logger.Event{
+					SessionID:  s.Config.ID,
+					AgentID:    "orchestrator",
+					Role:       "orchestrator",
+					Action:     "Sesión finalizada exitosamente",
+					Stage:      logger.StageFinish,
+					Status:     &st,
+					DurationMs: &dur,
+					Metadata:   finishMeta,
+				})
+			}
+		}
+	}()
+
+	exitCode, runErr = s.Runner.Run(ctx, binary, args, ws.TargetDir, onStart)
+	return runErr
+}
+
+// SyncTelemetry analiza el transcript de Antigravity (usando metrics.Collector) y registra tool calls
+// y subagentes invocados como eventos en events.jsonl.
+func (s *Session) SyncTelemetry(ctx context.Context, record *SessionRecord) error {
+	if record == nil {
+		return nil
+	}
+
+	targetDirs := []string{record.WorkingDir}
+	if record.WorktreeDir != "" {
+		targetDirs = append(targetDirs, record.WorktreeDir)
+	}
+
+	collector := metrics.NewCollector()
+	convID := record.ConversationID
+	if convID == "" {
+		foundID, err := collector.FindConversationID(record.ID, targetDirs, record.StartedAt)
+		if err == nil && foundID != "" {
+			convID = foundID
+			record.ConversationID = convID
 		}
 	}
 
-	return runErr
+	if convID == "" {
+		return nil
+	}
+
+	tPath := collector.ResolveTranscriptPath(convID)
+	steps, err := collector.ParseTranscriptSteps(tPath)
+	if err != nil || len(steps) == 0 {
+		return nil
+	}
+
+	if s.Logger == nil {
+		return nil
+	}
+
+	existingEvents, _ := s.Logger.GetEvents(ctx, record.ID)
+	seen := make(map[string]bool)
+	for _, evt := range existingEvents {
+		if evt.Metadata != nil {
+			if key, ok := evt.Metadata["event_key"].(string); ok && key != "" {
+				seen[key] = true
+			}
+		}
+	}
+
+	for _, step := range steps {
+		stepTime := time.Now().UTC()
+		if t, err := time.Parse(time.RFC3339Nano, step.CreatedAt); err == nil {
+			stepTime = t
+		} else if t, err := time.Parse(time.RFC3339, step.CreatedAt); err == nil {
+			stepTime = t
+		}
+
+		for tcIdx, tc := range step.ToolCalls {
+			eventKey := fmt.Sprintf("step-%d-tc-%d-%s", step.StepIndex, tcIdx, tc.Name)
+			if seen[eventKey] {
+				continue
+			}
+
+			stage := logger.StagePending
+			if isReadTool(tc.Name) {
+				stage = logger.StageRead
+			}
+
+			var status *logger.Status
+			if step.Status == "ERROR" {
+				st := logger.StatusFailed
+				status = &st
+			} else {
+				st := logger.StatusOK
+				status = &st
+			}
+
+			meta := map[string]any{
+				"event_key":  eventKey,
+				"tool":       tc.Name,
+				"step_index": step.StepIndex,
+				"source":     step.Source,
+			}
+			if len(tc.Args) > 0 {
+				meta["args"] = string(tc.Args)
+			}
+
+			action := fmt.Sprintf("tool_call:%s", tc.Name)
+
+			_ = s.Logger.Emit(ctx, &logger.Event{
+				SessionID: record.ID,
+				AgentID:   "orchestrator",
+				Role:      "orchestrator",
+				Action:    action,
+				Stage:     stage,
+				Status:    status,
+				Timestamp: stepTime,
+				Metadata:  meta,
+			})
+			seen[eventKey] = true
+
+			if tc.Name == "invoke_subagent" {
+				subArgs, _ := metrics.ParseSubagentArgs(tc.Args)
+				for subIdx, subArg := range subArgs {
+					subKey := fmt.Sprintf("step-%d-tc-%d-sub-%d", step.StepIndex, tcIdx, subIdx)
+					if seen[subKey] {
+						continue
+					}
+					subMeta := map[string]any{
+						"event_key":     subKey,
+						"subagent_role": subArg.Role,
+						"subagent_type": subArg.TypeName,
+						"prompt":        subArg.Prompt,
+						"model":         subArg.Model,
+						"workspace":     subArg.Workspace,
+					}
+					st := logger.StatusOK
+					_ = s.Logger.Emit(ctx, &logger.Event{
+						SessionID: record.ID,
+						AgentID:   subArg.TypeName,
+						Role:      subArg.Role,
+						Action:    fmt.Sprintf("invoke_subagent:%s", subArg.Role),
+						Stage:     logger.StagePending,
+						Status:    &st,
+						Timestamp: stepTime,
+						Metadata:  subMeta,
+					})
+					seen[subKey] = true
+				}
+			}
+		}
+	}
+
+	return nil
 }
+
+func isReadTool(name string) bool {
+	switch name {
+	case "view_file", "search_web", "read_url_content", "read_browser_page", "manage_task", "schedule", "ask_question":
+		return true
+	default:
+		return false
+	}
+}
+

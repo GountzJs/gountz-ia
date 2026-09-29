@@ -7,9 +7,11 @@ import (
 	"gz-ia/internal/features/tooling"
 	"gz-ia/internal/features/workspace"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 type mockRunner struct {
@@ -860,4 +862,104 @@ func TestSession_StartEventMetadata_PromptTruncation(t *testing.T) {
 		t.Errorf("prompt truncado debe terminar con '...', obtenido: %s", prompt[len(prompt)-5:])
 	}
 }
+
+func TestSession_GuaranteedClosure(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+	mockRun := &mockRunner{returnErr: errors.New("simulated error")}
+	mockLog := &mockLoggerService{}
+
+	cfg := Config{
+		ID:         "closure-sess",
+		Provider:   "agy",
+		WorkingDir: tmpDir,
+	}
+
+	sess := New(cfg, mockRun, store).WithLogger(mockLog)
+	err := sess.Start(context.Background())
+	if err == nil {
+		t.Fatal("Se esperaba un error del runner")
+	}
+
+	rec, getErr := store.Get("closure-sess")
+	if getErr != nil {
+		t.Fatalf("Store.Get falló: %v", getErr)
+	}
+	if rec.Status != StatusFailed {
+		t.Errorf("Status esperado '%s', obtenido '%s'", StatusFailed, rec.Status)
+	}
+	if rec.FinishedAt == nil {
+		t.Error("FinishedAt no debe ser nil tras el cierre garantizado")
+	}
+
+	// Verificar evento FINISH emitido
+	var finishEvt *logger.Event
+	for _, evt := range mockLog.emitted {
+		if evt.Stage == logger.StageFinish {
+			finishEvt = evt
+			break
+		}
+	}
+	if finishEvt == nil {
+		t.Fatal("Se esperaba evento StageFinish emitido en el logger")
+	}
+	if finishEvt.Status == nil || *finishEvt.Status != logger.StatusFailed {
+		t.Errorf("Status de evento FINISH esperado FAILED, obtenido %v", finishEvt.Status)
+	}
+}
+
+func TestSession_SyncTelemetry(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+	mockRun := &mockRunner{}
+
+	// Crear archivo transcript.jsonl simulado de Antigravity
+	convID := "conv-telemetry-1"
+	brainDir := filepath.Join(tmpDir, "brain", convID, ".system_generated", "logs")
+	if err := os.MkdirAll(brainDir, 0755); err != nil {
+		t.Fatalf("error creando brainDir: %v", err)
+	}
+
+	transcriptContent := `{"step_index":0,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-09-24T20:00:00Z","content":"ok","tool_calls":[{"name":"run_command","args":{"CommandLine":"ls"}},{"name":"invoke_subagent","args":{"Subagents":[{"Role":"researcher","TypeName":"research","Prompt":"check code"}]}}]}
+`
+	if err := os.WriteFile(filepath.Join(brainDir, "transcript.jsonl"), []byte(transcriptContent), 0644); err != nil {
+		t.Fatalf("WriteFile transcript falló: %v", err)
+	}
+
+	logStore := logger.NewFileStore(filepath.Join(tmpDir, ".harness", "sessions"))
+	logSvc := logger.NewService(tmpDir, logger.WithStore(logStore))
+
+	rec := &SessionRecord{
+		ID:             "telemetry-sess",
+		ConversationID: convID,
+		WorkingDir:     tmpDir,
+		StartedAt:      time.Now(),
+		Status:         StatusRunning,
+	}
+	_ = store.Save(rec)
+
+	t.Setenv("HOME", tmpDir)
+	// Sobrescribir brain base in collector setting brainDir option or manually syncing
+	sess := New(Config{ID: "telemetry-sess", WorkingDir: tmpDir}, mockRun, store).WithLogger(logSvc)
+	
+	// Create brain structure under ~/.gemini/antigravity-cli/brain/<convID>/...
+	stdBrainDir := filepath.Join(tmpDir, ".gemini", "antigravity-cli", "brain", convID, ".system_generated", "logs")
+	_ = os.MkdirAll(stdBrainDir, 0755)
+	_ = os.WriteFile(filepath.Join(stdBrainDir, "transcript.jsonl"), []byte(transcriptContent), 0644)
+
+	err := sess.SyncTelemetry(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("SyncTelemetry falló: %v", err)
+	}
+
+	events, err := logSvc.GetEvents(context.Background(), "telemetry-sess")
+	if err != nil {
+		t.Fatalf("GetEvents falló: %v", err)
+	}
+
+	if len(events) < 2 {
+		t.Fatalf("Se esperaban al menos 2 eventos sincronizados (run_command e invoke_subagent), obtenidos %d", len(events))
+	}
+}
+
 

@@ -26,6 +26,7 @@ const (
 // SessionRecord modela la metadata persistida de una sesión en .harness/sessions/.
 type SessionRecord struct {
 	ID              string          `json:"id"`
+	ConversationID  string          `json:"conversation_id,omitempty"`
 	PID             int             `json:"pid"`
 	Provider        string          `json:"provider"`
 	Status          SessionStatus   `json:"status"`

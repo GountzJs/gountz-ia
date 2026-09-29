@@ -85,3 +85,35 @@ func TestManifest_LegacyFallback(t *testing.T) {
 		t.Errorf("CreatedFiles inesperado: %v", loaded.CreatedFiles)
 	}
 }
+
+func TestUpdateManifestDelta(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessID := "sess-delta"
+	manifestPath := workspace.ManifestPath(tmpDir, sessID)
+
+	m := workspace.NewManifest(sessID)
+	if err := workspace.SaveManifest(tmpDir, m); err != nil {
+		t.Fatalf("SaveManifest falló: %v", err)
+	}
+
+	worktreeDir := t.TempDir()
+
+	// Crear un archivo ficticio en el worktree
+	newFilePath := filepath.Join(worktreeDir, "new_file.go")
+	if err := os.WriteFile(newFilePath, []byte("package main\n"), 0644); err != nil {
+		t.Fatalf("WriteFile falló: %v", err)
+	}
+
+	if err := workspace.UpdateManifestDelta(manifestPath, worktreeDir); err != nil {
+		t.Fatalf("UpdateManifestDelta falló: %v", err)
+	}
+
+	loaded, err := workspace.LoadManifest(tmpDir, sessID)
+	if err != nil {
+		t.Fatalf("LoadManifest falló: %v", err)
+	}
+	if loaded.SessionID != sessID {
+		t.Errorf("SessionID esperado '%s', obtenido '%s'", sessID, loaded.SessionID)
+	}
+}
+
