@@ -19,7 +19,8 @@ Guía detallada de sintaxis, argumentos, banderas y códigos de retorno de todos
 | [`gz-ia session list`](#gz-ia-session-list) | `-d, --dir` | N/A | Lista en formato tabular todas las sesiones del proyecto. |
 | [`gz-ia session show`](#gz-ia-session-show) | `<id>`<br>`-d, --dir` | N/A | Muestra la metadata detallada y estado de una sesión. |
 | [`gz-ia session kill`](#gz-ia-session-kill) | `<id>`<br>`-d, --dir` | N/A | Termina de forma controlada el proceso de una sesión (`SIGTERM` + `SIGKILL` en Unix / `taskkill` en Windows). |
-| [`gz-ia session resume`](#gz-ia-session-resume) | `<id>`<br>`-d, --dir` | Heredado de la sesión | Reanuda una sesión previa invocando al agente nativo (`--continue`/`--resume`). |
+| [`gz-ia session resume`](#gz-ia-session-resume) | `<id>`<br>`-r, --reload-toolkits`<br>`-d, --dir` | Heredado de la sesión | Reanuda una sesión previa reconectando al agente nativo (`--continue`/`--resume`), re-proyectando opcionalmente toolkits. |
+| [`gz-ia session reload-toolkits`](#gz-ia-session-reload-toolkits) | `<id>`<br>`-d, --dir` | N/A | Recarga en caliente los manifiestos, directivas, reglas y skills de los toolkits en la sesión. |
 | [`gz-ia session delete`](#gz-ia-session-delete) | `<id>`<br>`-d, --dir` | N/A | Elimina el registro persistente y destruye el worktree y la rama asociada. |
 | [`gz-ia session path`](#gz-ia-session-path) | `<id>`<br>`-d, --dir` | N/A | Imprime en `stdout` la ruta absoluta del espacio de trabajo. |
 | [`gz-ia session diff`](#gz-ia-session-diff) | `<id>`<br>`--stat`<br>`-d, --dir` | N/A | Muestra las diferencias de código producidas en la sesión. |
@@ -168,11 +169,35 @@ Envía `SIGTERM` al grupo de procesos y escala a `SIGKILL` si no finaliza dentro
 
 ### <span id="gz-ia-session-resume"></span>`gz-ia session resume` *(alias: `continue`)*
 
-Reanuda una sesión existente, reingresando a su worktree y reconectando la terminal interactiva con la bandera de reanudación adecuada del agente (`--continue` o `--resume`).
+Reanuda una sesión existente, reingresando a su worktree y reconectando la terminal interactiva con la bandera de reanudación adecuada del agente (`--continue` o `--resume`). Con la opción `--reload-toolkits` (`-r`), fuerza adicionalmente la resolución, composición y re-proyección atómica de reglas, habilidades y manifiestos MCP en el espacio de trabajo antes de reanudar la ejecución.
 
 ```bash
-gz-ia session resume <session-id>
-gz-ia session continue <session-id>
+gz-ia session resume <session-id> [--reload-toolkits | -r]
+gz-ia session continue <session-id> [-r]
+```
+
+#### Flags
+
+- `-r, --reload-toolkits`: Fuerza la recarga, resolución y re-proyección de los toolkits asignados a la sesión en el worktree (o directorio activo) antes de reanudar la ejecución del agente.
+
+---
+
+### <span id="gz-ia-session-reload-toolkits"></span>`gz-ia session reload-toolkits`
+
+Recarga activamente los manifiestos, directivas (`AGENTS.md`), reglas (`.agents/rules/`), habilidades (`.agents/skills/`) y servidores MCP de los toolkits asignados a una sesión en su espacio de trabajo o worktree aislado sin necesidad de detener ni reiniciar la sesión.
+
+```bash
+gz-ia session reload-toolkits <session-id> [-d <directorio>]
+```
+
+#### Flags
+
+- `-d, --dir <directorio>`: Ruta al directorio del proyecto.
+
+#### Ejemplo
+
+```bash
+gz-ia session reload-toolkits 3f9a12c8
 ```
 
 ---

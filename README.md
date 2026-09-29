@@ -141,6 +141,12 @@ gz-ia session list
 gz-ia session read <session_id>
 gz-ia session read <session_id> --stat
 
+# Reanudar una sesión reconectando el agente (con re-proyección opcional de toolkits)
+gz-ia session resume <session_id> --reload-toolkits
+
+# Recargar en caliente reglas, directivas y servidores MCP en una sesión activa
+gz-ia session reload-toolkits <session_id>
+
 # Integrar los cambios producidos al workspace activo (como cambios unstaged)
 gz-ia session get <session_id>
 ```

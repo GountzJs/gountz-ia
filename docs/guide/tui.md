@@ -122,6 +122,7 @@ Recuerda que la TUI es únicamente una interfaz visual. **Absolutamente todas** 
 - Inspeccionar contexto $\rightarrow$ `gz-ia session context <id> [-j]`
 - Inspeccionar worktree $\rightarrow$ `gz-ia session read <id> [--stat]`
 - Traer cambios $\rightarrow$ `gz-ia session get <id>`
-- Reanudar sesión $\rightarrow$ `gz-ia session resume <id>`
+- Reanudar sesión $\rightarrow$ `gz-ia session resume <id> [--reload-toolkits | -r]`
+- Recargar toolkits $\rightarrow$ `gz-ia session reload-toolkits <id>`
 - Matar proceso $\rightarrow$ `gz-ia session kill <id>`
 - Actualizar binario $\rightarrow$ `gz-ia update`

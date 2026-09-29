@@ -97,6 +97,35 @@ gz-ia session resume 3f9a12c8
 gz-ia session continue 3f9a12c8
 ```
 
+#### Re-proyección y Actualización de Toolkits en Resume (`--reload-toolkits` / `-r`)
+Por defecto, al reanudar una sesión (`Resume`), si el espacio de trabajo o worktree de la sesión ya cuenta con un manifiesto (`.harness/manifest.json`), se omite la fase de proyección para evitar sobreescrituras innecesarias. 
+
+Al especificar la bandera `--reload-toolkits` (o `-r`):
+```bash
+gz-ia session resume 3f9a12c8 --reload-toolkits
+```
+El orquestador fuerza la re-evaluación (`Tooling.ReloadToolkits`), resolviendo los perfiles asignados (`record.Profiles`), componiendo nuevamente los toolkits y re-proyectando atómicamente:
+- **Directivas y Reglas:** Actualiza `AGENTS.md` y `.agents/rules/*.md`.
+- **Habilidades (*Skills*):** Sincroniza `.agents/skills/`.
+- **Manifiestos MCP:** Re-evalúa la configuración de servidores MCP del preset/toolkit, preservando la reserva interna del servidor `gz-ia`.
+
+---
+
+### Recarga en Caliente de Toolkits (`session reload-toolkits`)
+Permite actualizar la configuración, reglas, habilidades y servidores MCP de los toolkits asignados a una sesión **sin interrumpir el proceso ni reiniciar la sesión**:
+
+```bash
+gz-ia session reload-toolkits 3f9a12c8
+```
+
+#### Mecanismo Operativo:
+1. **Recuperación de Estado:** Obtiene el `SessionRecord` desde `.harness/sessions/<id>.json` e identifica el directorio de trabajo objetivo (`worktree_dir` o `working_dir`).
+2. **Re-composición Atómica:** Invoca a `tooling.Service.ReloadToolkits`, resolviendo los perfiles activos y componiendo la nueva estructura de directivas y servidores MCP.
+3. **Proyección en el Worktree:** Aplica las modificaciones en el árbol de trabajo de la sesión y actualiza el manifiesto persistente.
+4. **Registro Teleférico de Observabilidad:** Emite un evento `logger.Event` estructurado con la acción `Toolkits recargados exitosamente (<perfiles>)` en `.harness/sessions/<id>.events.jsonl` para rastrear la recarga en caliente.
+
+---
+
 ### Obtención de Ruta para Scripts (`session path`)
 Imprime en `stdout` la ruta absoluta del directorio de trabajo de la sesión sin texto adicional, ideal para integrarse en scripts de shell:
 
