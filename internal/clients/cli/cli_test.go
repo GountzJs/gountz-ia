@@ -561,6 +561,79 @@ func TestSessionCmd_Resume(t *testing.T) {
 	}
 }
 
+func TestSessionCmd_Resume_WithReloadToolkits(t *testing.T) {
+	tmpDir := t.TempDir()
+	tkDir := filepath.Join(tmpDir, ".harness", "toolkits", "base-profile")
+	_ = os.MkdirAll(tkDir, 0755)
+	_ = os.WriteFile(filepath.Join(tkDir, "toolkit.json"), []byte(`{"id":"base-profile","name":"Base Profile"}`), 0644)
+
+	store := session.NewFileStore(tmpDir)
+	_ = store.Save(&session.SessionRecord{
+		ID:              "resume_cli_reload",
+		Status:          session.StatusCompleted,
+		PermissionLevel: session.PermissionAutonomous,
+		WorkingDir:      tmpDir,
+		Profiles:        []string{"base-profile"},
+		StartedAt:       time.Now(),
+	})
+
+	oldStore := defaultSessionStore
+	defaultSessionStore = store
+	defer func() { defaultSessionStore = oldStore }()
+
+	mockRunner := &mockSessionRunner{}
+	oldRunner := defaultSessionRunner
+	defaultSessionRunner = mockRunner
+	defer func() { defaultSessionRunner = oldRunner }()
+
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"session", "resume", "resume_cli_reload", "-r", "--dir", tmpDir})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("session resume -r falló: %v", err)
+	}
+}
+
+func TestSessionCmd_ReloadToolkits(t *testing.T) {
+	tmpDir := t.TempDir()
+	tkDir := filepath.Join(tmpDir, ".harness", "toolkits", "base-profile")
+	_ = os.MkdirAll(tkDir, 0755)
+	_ = os.WriteFile(filepath.Join(tkDir, "toolkit.json"), []byte(`{"id":"base-profile","name":"Base Profile"}`), 0644)
+
+	store := session.NewFileStore(tmpDir)
+	_ = store.Save(&session.SessionRecord{
+		ID:              "reload_cli_sess",
+		Status:          session.StatusCompleted,
+		PermissionLevel: session.PermissionAutonomous,
+		WorkingDir:      tmpDir,
+		Profiles:        []string{"base-profile"},
+		StartedAt:       time.Now(),
+	})
+
+	oldStore := defaultSessionStore
+	defaultSessionStore = store
+	defer func() { defaultSessionStore = oldStore }()
+
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"session", "reload-toolkits", "reload_cli_sess", "--dir", tmpDir})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("session reload-toolkits falló: %v", err)
+	}
+
+	if !strings.Contains(buf.String(), "recargados y re-proyectados con éxito") {
+		t.Errorf("salida esperada de éxito en reload-toolkits, obtenida: %s", buf.String())
+	}
+}
+
 type mockCLIWorkspaceProvider struct {
 	cleanedWT    string
 	cleanedBr    string

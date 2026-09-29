@@ -506,8 +506,10 @@ type mockToolingService struct {
 	getPresetFunc       func(ctx context.Context, name string) (*tooling.Preset, error)
 	projectWorktreeFunc func(ctx context.Context, targetDir string, composed *tooling.ComposedTooling, sessionID string, baseDir ...string) error
 	unprojectFunc       func(ctx context.Context, targetDir string, manifest *workspace.Manifest) error
+	reloadToolkitsFunc  func(ctx context.Context, targetDir string, profiles []string, sessionID string, baseDir ...string) error
 	projectCalled       bool
 	unprojectCalled     bool
+	reloadCalled        bool
 }
 
 func (m *mockToolingService) ResolveToolkits(ctx context.Context, names []string) ([]string, error) {
@@ -555,6 +557,14 @@ func (m *mockToolingService) Unproject(ctx context.Context, targetDir string, ma
 	return nil
 }
 
+func (m *mockToolingService) ReloadToolkits(ctx context.Context, targetDir string, profiles []string, sessionID string, baseDir ...string) error {
+	m.reloadCalled = true
+	if m.reloadToolkitsFunc != nil {
+		return m.reloadToolkitsFunc(ctx, targetDir, profiles, sessionID, baseDir...)
+	}
+	return nil
+}
+
 func TestSessionStart_ResumeSkipsProjectingWhenManifestExists(t *testing.T) {
 	tmpDir := t.TempDir()
 	store := NewFileStore(tmpDir)
@@ -583,6 +593,38 @@ func TestSessionStart_ResumeSkipsProjectingWhenManifestExists(t *testing.T) {
 
 	if toolingMock.projectCalled {
 		t.Error("ProjectIntoWorktree NO debió ser llamado al reanudar una sesión que ya tenía manifiesto")
+	}
+}
+
+func TestSessionStart_ResumeForcesProjectingWhenReloadToolkitsActive(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+	mockRun := &mockRunner{}
+	toolingMock := &mockToolingService{}
+
+	sessID := "resume_manifest_reload"
+	// Guardar un manifiesto previo
+	manifest := workspace.NewManifest(sessID)
+	if err := workspace.SaveManifest(tmpDir, manifest); err != nil {
+		t.Fatalf("SaveManifest falló: %v", err)
+	}
+
+	cfg := Config{
+		ID:             sessID,
+		WorkingDir:     tmpDir,
+		Resume:         true,
+		ReloadToolkits: true,
+		Profiles:       []string{"base-profile"},
+	}
+
+	sess := New(cfg, mockRun, store).WithTooling(toolingMock)
+	err := sess.Start(context.Background())
+	if err != nil {
+		t.Fatalf("Start() falló: %v", err)
+	}
+
+	if !toolingMock.projectCalled {
+		t.Error("ProjectIntoWorktree DEBIÓ ser llamado al reanudar con ReloadToolkits=true aun teniendo manifiesto")
 	}
 }
 

@@ -49,7 +49,8 @@ type Service interface {
 	Get(ctx context.Context, id string) (*workspace.MergeResult, error)
 	Read(ctx context.Context, id string, statOnly bool) (string, error)
 	Kill(ctx context.Context, id string) error
-	Resume(ctx context.Context, id string) error
+	Resume(ctx context.Context, id string, reloadToolkits ...bool) error
+	ReloadToolkits(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
 	Path(ctx context.Context, id string) (string, error)
 	Diff(ctx context.Context, id string, statOnly bool) (string, error)
@@ -364,7 +365,12 @@ func (s *sessionService) Kill(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *sessionService) Resume(ctx context.Context, id string) error {
+func (s *sessionService) Resume(ctx context.Context, id string, reloadToolkits ...bool) error {
+	shouldReload := false
+	if len(reloadToolkits) > 0 {
+		shouldReload = reloadToolkits[0]
+	}
+
 	if s.store == nil {
 		return errors.New("store no inicializado")
 	}
@@ -393,6 +399,7 @@ func (s *sessionService) Resume(ctx context.Context, id string) error {
 		WorkingDir:      record.WorkingDir,
 		PermissionLevel: record.PermissionLevel,
 		Resume:          true,
+		ReloadToolkits:  shouldReload,
 		BinaryPath:      bin,
 		IsIsolated:      record.IsIsolated,
 		WorktreeDir:     record.WorktreeDir,
@@ -406,6 +413,46 @@ func (s *sessionService) Resume(ctx context.Context, id string) error {
 		WithVault(s.vault).
 		WithTooling(s.tooling)
 	return sess.Start(ctx)
+}
+
+func (s *sessionService) ReloadToolkits(ctx context.Context, id string) error {
+	if s.store == nil {
+		return errors.New("store no inicializado")
+	}
+
+	record, err := s.store.Get(id)
+	if err != nil {
+		return err
+	}
+
+	targetDir := record.WorkingDir
+	if record.IsIsolated && record.WorktreeDir != "" {
+		targetDir = record.WorktreeDir
+	}
+
+	if s.tooling == nil {
+		return errors.New("servicio de tooling no disponible")
+	}
+
+	if len(record.Profiles) == 0 {
+		return fmt.Errorf("la sesión '%s' no tiene toolkits ni perfiles asociados para recargar", id)
+	}
+
+	if err := s.tooling.ReloadToolkits(ctx, targetDir, record.Profiles, record.ID, s.workDir); err != nil {
+		return fmt.Errorf("error al recargar toolkits para la sesión '%s': %w", id, err)
+	}
+
+	if s.logger != nil {
+		_ = s.logger.Emit(ctx, &logger.Event{
+			SessionID: id,
+			AgentID:   "orchestrator",
+			Role:      "orchestrator",
+			Action:    fmt.Sprintf("Toolkits recargados exitosamente (%s)", strings.Join(record.Profiles, ", ")),
+			Stage:     logger.StagePending,
+		})
+	}
+
+	return nil
 }
 
 func (s *sessionService) Delete(ctx context.Context, id string) error {

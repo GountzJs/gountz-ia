@@ -45,6 +45,7 @@ type Config struct {
 	InitialPrompt   string
 	PermissionLevel PermissionLevel
 	Resume          bool
+	ReloadToolkits  bool
 	BinaryPath      string
 	IsIsolated      bool
 	WorktreeDir     string
@@ -312,12 +313,16 @@ func (s *Session) Start(ctx context.Context) error {
 				}
 			}
 
-			// Si es reanudación y ya existe un manifiesto previo, no volver a reproyectar desde cero
+			// Si es reanudación y ya existe un manifiesto previo, no volver a reproyectar desde cero (salvo que ReloadToolkits sea true)
 			shouldProject := true
 			if s.Config.Resume {
 				if existingManifest, err := workspace.LoadManifest(ws.WorkingDir, s.Config.ID); err == nil && existingManifest != nil {
 					shouldProject = false
 				}
+			}
+
+			if s.Config.ReloadToolkits {
+				shouldProject = true
 			}
 
 			if shouldProject {

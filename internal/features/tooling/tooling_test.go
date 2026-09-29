@@ -871,3 +871,56 @@ func TestGenerateMasterAgentsMarkdown(t *testing.T) {
 		}
 	}
 }
+
+func TestToolingService_ReloadToolkits(t *testing.T) {
+	ctx := context.Background()
+	tempToolingDir := t.TempDir()
+
+	tkDir := filepath.Join(tempToolingDir, "toolkits", "rel-tk")
+	_ = os.MkdirAll(tkDir, 0755)
+
+	manifestData := `{
+		"id": "rel-tk",
+		"name": "Reload Toolkit Test",
+		"version": "1.0.0",
+		"description": "Toolkit para test de reload",
+		"rules": ["01-reload.md"]
+	}`
+	_ = os.WriteFile(filepath.Join(tkDir, "toolkit.json"), []byte(manifestData), 0644)
+	_ = os.WriteFile(filepath.Join(tkDir, "AGENTS.md"), []byte("# Reload Directives\n"), 0644)
+	rulesDir := filepath.Join(tkDir, "rules")
+	_ = os.MkdirAll(rulesDir, 0755)
+	_ = os.WriteFile(filepath.Join(rulesDir, "01-reload.md"), []byte("# Reload Rule\n"), 0644)
+
+	configData := `{
+		"presets": [
+			{
+				"name": "reload-preset",
+				"description": "Preset para reload",
+				"toolkits": ["rel-tk"]
+			}
+		]
+	}`
+	_ = os.WriteFile(filepath.Join(tempToolingDir, "config.json"), []byte(configData), 0644)
+
+	svc := NewService(tempToolingDir)
+
+	targetDir := t.TempDir()
+	baseDir := t.TempDir()
+	sessID := "reload_sess_01"
+
+	err := svc.ReloadToolkits(ctx, targetDir, []string{"reload-preset"}, sessID, baseDir)
+	if err != nil {
+		t.Fatalf("ReloadToolkits falló: %v", err)
+	}
+
+	// Comprobar que proyectó la regla y el manifiesto
+	if _, err := os.Stat(filepath.Join(targetDir, ".agents", "rules", "01-reload.md")); err != nil {
+		t.Errorf("La regla 01-reload.md debió ser proyectada en reload: %v", err)
+	}
+
+	manifest, err := workspace.LoadManifest(baseDir, sessID)
+	if err != nil || manifest == nil {
+		t.Fatalf("LoadManifest debió cargar manifiesto válido: %v", err)
+	}
+}

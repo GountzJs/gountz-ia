@@ -59,7 +59,7 @@ func newSessionCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:          "session",
-		Short:        "Gestiona sesiones agénticas locales (list, kill, resume, delete, show, diff, merge, read, get, path, cleanup, prune)",
+		Short:        "Gestiona sesiones agénticas locales (list, kill, resume, reload-toolkits, delete, show, diff, merge, read, get, path, cleanup, prune)",
 		Long:         `Permite listar, inspeccionar, reanudar, eliminar, comparar, fusionar, limpiar u obtener la ruta de sesiones registradas en el proyecto actual.`,
 		SilenceUsage: true,
 	}
@@ -163,6 +163,7 @@ func newSessionCmd() *cobra.Command {
 	}
 
 	// Subcomando resume (revivir)
+	var reloadToolkitsFlag bool
 	resumeCmd := &cobra.Command{
 		Use:     "resume <id>",
 		Aliases: []string{"continue"},
@@ -182,9 +183,10 @@ func newSessionCmd() *cobra.Command {
 				Render(fmt.Sprintf("%s Reanudando sesión [%s] en [%s]...", icons.Sync, rec.ID, rec.WorkingDir))
 			fmt.Fprintln(c.OutOrStdout(), header)
 
-			return svc.Resume(c.Context(), id)
+			return svc.Resume(c.Context(), id, reloadToolkitsFlag)
 		},
 	}
+	resumeCmd.Flags().BoolVarP(&reloadToolkitsFlag, "reload-toolkits", "r", false, "Fuerza la recarga y re-proyección de toolkits en el worktree antes de reanudar")
 
 	// Subcomando delete (rm)
 	deleteCmd := &cobra.Command{
@@ -858,9 +860,32 @@ func newSessionCmd() *cobra.Command {
 	}
 	contextCmd.Flags().BoolVarP(&contextJsonFlag, "json", "j", false, "Emite el contexto como JSON a stdout")
 
+	// Subcomando reload-toolkits
+	reloadToolkitsCmd := &cobra.Command{
+		Use:   "reload-toolkits <id>",
+		Short: "Recarga activamente los manifiestos, directivas, reglas y skills de los toolkits en la sesión",
+		Long:  `Forza la re-evaluación y re-proyección de los toolkits asignados a la sesión en su directorio de trabajo o worktree aislado.`,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			id := args[0]
+			workDir = resolveWorkDir(c.Context(), workDir)
+			svc := getSessionService(workDir)
+			if err := svc.ReloadToolkits(c.Context(), id); err != nil {
+				return err
+			}
+
+			icons := tui.GetIcons()
+			msg := lipgloss.NewStyle().Foreground(tui.ColorSuccess).Bold(true).
+				Render(fmt.Sprintf("%s Toolkits recargados y re-proyectados con éxito para la sesión '%s'.", icons.Check, id))
+			fmt.Fprintln(c.OutOrStdout(), msg)
+			return nil
+		},
+	}
+
 	cmd.AddCommand(listCmd)
 	cmd.AddCommand(killCmd)
 	cmd.AddCommand(resumeCmd)
+	cmd.AddCommand(reloadToolkitsCmd)
 	cmd.AddCommand(deleteCmd)
 	cmd.AddCommand(showCmd)
 	cmd.AddCommand(diffCmd)

@@ -27,6 +27,7 @@ type Service interface {
 	ComposeToolkits(ctx context.Context, toolkitIDs []string) (*ComposedTooling, error)
 	RegisterToolsInKernel(ctx context.Context, kernel *orchy.Kernel, tooling *ComposedTooling, workDir string) error
 	ProjectIntoWorktree(ctx context.Context, targetDir string, composed *ComposedTooling, sessionID string, baseDir ...string) error
+	ReloadToolkits(ctx context.Context, targetDir string, profiles []string, sessionID string, baseDir ...string) error
 	Unproject(ctx context.Context, targetDir string, manifest *workspace.Manifest) error
 	ToolingDir() string
 	ProjectDir() string
@@ -578,6 +579,53 @@ func (s *toolingService) ProjectIntoWorktree(ctx context.Context, targetDir stri
 	if base != "" {
 		if err := workspace.SaveManifest(base, manifest); err != nil {
 			return fmt.Errorf("falló al guardar manifiesto de sesión: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// ReloadToolkits fuerza la resolución, composición y re-proyección de toolkits en el worktree de una sesión.
+func (s *toolingService) ReloadToolkits(ctx context.Context, targetDir string, profiles []string, sessionID string, baseDir ...string) error {
+	if len(profiles) == 0 {
+		return nil
+	}
+
+	activeToolkitIDs, err := s.ResolveToolkits(ctx, profiles)
+	if err != nil {
+		return fmt.Errorf("error al resolver toolkits en recarga: %w", err)
+	}
+
+	composedTooling, err := s.ComposeToolkits(ctx, activeToolkitIDs)
+	if err != nil {
+		return fmt.Errorf("error al componer toolkits en recarga: %w", err)
+	}
+
+	if composedTooling != nil {
+		for _, profName := range profiles {
+			if preset, err := s.GetPreset(ctx, profName); err == nil && preset != nil {
+				for k, v := range preset.MCPServers {
+					if k == "gz-ia" {
+						return fmt.Errorf("el servidor MCP 'gz-ia' está reservado para uso interno y no puede ser definido por un perfil")
+					}
+					if existing, conflict := composedTooling.MCPServers[k]; conflict {
+						if !reflect.DeepEqual(existing, v) {
+							return fmt.Errorf("colisión de servidores MCP: el servidor '%s' está definido con configuraciones distintas", k)
+						}
+					}
+					composedTooling.MCPServers[k] = v
+				}
+				for k, v := range preset.Env {
+					if existingVal, conflict := composedTooling.Env[k]; conflict && existingVal != v {
+						return fmt.Errorf("colisión de variables de entorno: variable '%s' con valores distintos (%s vs %s)", k, existingVal, v)
+					}
+					composedTooling.Env[k] = v
+				}
+			}
+		}
+
+		if err := s.ProjectIntoWorktree(ctx, targetDir, composedTooling, sessionID, baseDir...); err != nil {
+			return fmt.Errorf("error al proyectar tooling en recarga: %w", err)
 		}
 	}
 

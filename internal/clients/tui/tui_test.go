@@ -359,7 +359,10 @@ func (m *mockTUISessionService) GetSession(ctx context.Context, id string) (*ses
 	return nil, nil
 }
 func (m *mockTUISessionService) Kill(ctx context.Context, id string) error           { return nil }
-func (m *mockTUISessionService) Resume(ctx context.Context, id string) error         { return nil }
+func (m *mockTUISessionService) Resume(ctx context.Context, id string, reloadToolkits ...bool) error {
+	return nil
+}
+func (m *mockTUISessionService) ReloadToolkits(ctx context.Context, id string) error { return nil }
 func (m *mockTUISessionService) Delete(ctx context.Context, id string) error         { return nil }
 func (m *mockTUISessionService) Path(ctx context.Context, id string) (string, error) { return "", nil }
 func (m *mockTUISessionService) Diff(ctx context.Context, id string, statOnly bool) (string, error) {

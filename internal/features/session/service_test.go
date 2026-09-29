@@ -1249,3 +1249,39 @@ func TestSessionService_Context_NilDependencies(t *testing.T) {
 	}
 }
 
+func TestService_ReloadToolkits(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewFileStore(tmpDir)
+
+	_ = store.Save(&SessionRecord{
+		ID:         "reload_test_01",
+		Status:     StatusCompleted,
+		WorkingDir: tmpDir,
+		Profiles:   []string{"go-craft"},
+	})
+
+	toolingMock := &mockToolingService{}
+	svc := NewService(tmpDir, WithStore(store), WithTooling(toolingMock))
+
+	err := svc.ReloadToolkits(context.Background(), "reload_test_01")
+	if err != nil {
+		t.Fatalf("ReloadToolkits falló: %v", err)
+	}
+
+	if !toolingMock.reloadCalled {
+		t.Error("ReloadToolkits del tooling service debió ser invocado")
+	}
+
+	// Caso sin profiles
+	_ = store.Save(&SessionRecord{
+		ID:         "no_profiles",
+		Status:     StatusCompleted,
+		WorkingDir: tmpDir,
+		Profiles:   nil,
+	})
+	err = svc.ReloadToolkits(context.Background(), "no_profiles")
+	if err == nil {
+		t.Error("ReloadToolkits en sesión sin profiles debió retornar error")
+	}
+}
+
